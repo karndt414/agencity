@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from
 import PixelOffice from './components/PixelOffice'
 import { ROOMS, type RoomData } from './data/rooms'
 import { CORE_CREATURES, useAgencity, type CreatureState } from './hooks/useAgencity'
+import agencityGreenLogo from '../../assets/agencitygreen.png'
 import './App.css'
 
 const agentIcons: Record<string, string> = {
@@ -145,19 +146,8 @@ function App() {
       </div>
 
       <header className="game-topbar">
-        <div className="game-brand pixel-panel">
-          <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
-          <div>
-            <h1>AGENCITY</h1>
-            <p className={`backend-status ${connection}`}><i /> {connection === 'online' ? 'AGENT NETWORK ONLINE' : connection.toUpperCase()}</p>
-          </div>
-        </div>
-
-        <div className="day-hud pixel-panel">
-          <span className="sun-icon">☀</span>
-          <div><small>BUILD WEEK · DAY 01</small><strong>COZY SHIFT</strong></div>
-          <span className="hud-divider" />
-          <div className="game-clock"><b>6:42</b><small>PM</small></div>
+        <div className="top-logo">
+          <img src={agencityGreenLogo} alt="Agencity" />
         </div>
 
         <div className="resource-hud pixel-panel" aria-label="Company resources">
