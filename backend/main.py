@@ -11,10 +11,8 @@ from pydantic import BaseModel
 from .alert_pipeline import CreatureAlert
 from .config import has_openai_api_key
 from .creature_manager import (
-    DATA_FILES,
     collaborate_on_quest,
     direct_creatures,
-    load_data,
     refine_hunt,
     release_all,
     hunt_creature as run_hunt,
@@ -85,6 +83,7 @@ async def health() -> dict[str, Any]:
         "agents_sdk": True,
         "agents_sdk_version": getattr(agents, "__version__", "unknown"),
         "api_key_configured": has_openai_api_key(),
+        "evidence_policy": "web-first",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -98,9 +97,8 @@ async def list_creatures() -> dict[str, list[str]]:
 async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict[str, Any]:
     supplied = request.data if request and request.data else {}
     data = {
-        name: supplied.get(name, load_data(name))
+        name: supplied.get(name, {})
         for name in CREATURES
-        if name in DATA_FILES
     }
     results = await release_all(data, manager.broadcast)
     return {
@@ -119,7 +117,7 @@ async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict
 async def hunt_endpoint(name: str, request: HuntRequest | None = None) -> dict[str, Any]:
     key = normalize_name(name)
     get_creature(key)
-    data = request.data if request and request.data is not None else load_data(key)
+    data = request.data if request and request.data is not None else {}
     alert = await run_hunt(key, data, manager.broadcast)
     return {"creature": key, "status": "found", "alert": alert.model_dump()}
 
@@ -162,7 +160,7 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
         name: (
             request.data
             if request.data is not None
-            else load_data(name) if name in DATA_FILES else {}
+            else {}
         )
         for name in names
     }

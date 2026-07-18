@@ -9,7 +9,7 @@ from agents import WebSearchTool
 import backend.creature_manager as creature_manager
 from backend.alert_pipeline import CreatureAlert, parse_alert
 from backend.creatures import CREATURES
-from backend.creature_manager import _usage_message, select_quest_coordinator
+from backend.creature_manager import _internal_context, _usage_message, select_quest_coordinator
 from backend.main import app
 
 
@@ -24,6 +24,16 @@ def test_health_and_agent_registry() -> None:
         any(isinstance(tool, WebSearchTool) for tool in CREATURES[name].tools)
         for name in ("pyre", "fetch", "sight", "lode")
     )
+    assert all(
+        CREATURES[name].model_settings.tool_choice == "web_search"
+        for name in ("pyre", "fetch", "sight", "lode")
+    )
+    assert all(
+        next(tool for tool in CREATURES[name].tools if isinstance(tool, WebSearchTool)).search_context_size
+        == "high"
+        for name in ("pyre", "fetch", "sight", "lode")
+    )
+    assert health.json()["evidence_policy"] == "web-first"
 
 
 def test_websocket_connect_and_ping() -> None:
@@ -72,7 +82,42 @@ def test_quest_dispatches_to_existing_creature(monkeypatch) -> None:
     assert response.json()["results"]["pyre"]["status"] == "found"
     assert captured["names"] == ["pyre"]
     assert captured["quest"] == "Find our largest avoidable expense"
-    assert "transactions" in captured["data_by_creature"]["pyre"]
+    assert captured["data_by_creature"]["pyre"] == {}
+
+
+def test_quest_preserves_explicit_internal_context_without_loading_fixtures(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_direct_creatures(names, quest, data_by_creature, sink):
+        captured["data"] = data_by_creature[names[0]]
+        return {
+            names[0]: CreatureAlert(
+                headline="Context received",
+                details="Explicit context remained supplemental",
+                impact="Scoped",
+                recommendation="Verify publicly",
+            )
+        }
+
+    monkeypatch.setattr("backend.main.direct_creatures", fake_direct_creatures)
+    supplied = {"source": "founder export", "records": [{"vendor": "Example"}]}
+    response = TestClient(app).post(
+        "/api/quests",
+        json={"quest": "Benchmark this expense", "target": "pyre", "data": supplied},
+    )
+
+    assert response.status_code == 200
+    assert captured["data"] == supplied
+
+
+def test_internal_context_is_explicitly_unverified() -> None:
+    empty = _internal_context({})
+    supplied = _internal_context({"private_metric": 42})
+
+    assert "None supplied" in empty
+    assert "Do not infer private company facts" in empty
+    assert "UNVERIFIED" in supplied
+    assert "supplemental private context" in supplied
 
 
 def test_quest_rejects_unknown_target() -> None:
