@@ -87,6 +87,13 @@ function safeSourceUrl(source: string): string | null {
   }
 }
 
+function safeArtifactUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  return /^\/api\/artifacts\/[0-9a-f]{12}-[a-z0-9][a-z0-9-]{0,80}\.html$/.test(value)
+    ? value
+    : null
+}
+
 function roomIdForCreature(rooms: RoomData[], creature: string): string | null {
   const room = rooms.find((candidate) => (
     candidate.id === creature
@@ -120,6 +127,7 @@ function App() {
     reports,
     spawn,
     states,
+    stopAgents,
     thoughts,
     usage,
   } = useAgencity()
@@ -142,6 +150,7 @@ function App() {
   const [questTarget, setQuestTarget] = useState('all')
   const [questError, setQuestError] = useState<string | null>(null)
   const [questPending, setQuestPending] = useState(false)
+  const [stopPending, setStopPending] = useState(false)
   const [lastQuest, setLastQuest] = useState<{ text: string; target: string } | null>(null)
   const [showSpawn, setShowSpawn] = useState(false)
   const [spawnRoomId, setSpawnRoomId] = useState('patch')
@@ -228,6 +237,7 @@ function App() {
   )
   const inboxUnreadCount = inboxAlerts.filter((alert) => !readAlertIds.has(alert.id)).length
   const activeInboxAlert = inboxAlerts.find((alert) => alert.id === activeInboxAlertId) ?? null
+  const activeArtifactUrl = safeArtifactUrl(activeInboxAlert?.artifact?.url)
   const activeInboxRoom = activeInboxAlert
     ? rooms.find((room) => room.id === roomIdForCreature(rooms, activeInboxAlert.creature)) ?? null
     : null
@@ -248,6 +258,7 @@ function App() {
   } as CSSProperties
 
   const totalAgents = rooms.reduce((sum, room) => sum + room.members.length, 0)
+  const runningAgentCount = Object.values(states).filter((state) => state === 'hunting').length
 
   const markAlertRead = useCallback((alertId: string) => {
     setReadAlertIds((current) => {
@@ -538,6 +549,15 @@ function App() {
       )
     } catch {
       // The agent hook exposes the specific runtime error in the system message area.
+    }
+  }
+
+  const stopAllAgents = async () => {
+    setStopPending(true)
+    try {
+      await stopAgents()
+    } finally {
+      setStopPending(false)
     }
   }
 
@@ -951,7 +971,7 @@ function App() {
                     >
                       <span className="inbox-message-meta"><b>{inboxShowsAllRooms && alertRoom ? `${alertRoom.room} · ${alert.creature}` : alert.creature}</b><time>{formatInboxTime(alert.createdAt)}</time></span>
                       <strong>{alert.headline}</strong>
-                      <small>{alert.phase === 'synthesis' ? 'PARTY SYNTHESIS' : alert.impact}</small>
+                      <small>{alert.artifact ? `HTML FILE · ${alert.artifact.filename}` : alert.phase === 'synthesis' ? 'PARTY SYNTHESIS' : alert.impact}</small>
                       {unread && <i aria-label="Unread" />}
                     </button>
                   )
@@ -971,6 +991,21 @@ function App() {
                     <div className="inbox-impact"><small>IMPACT</small><strong>{activeInboxAlert.impact}</strong></div>
                     <section className="inbox-reading-section"><small>WHAT THE AGENT FOUND</small><p>{activeInboxAlert.details}</p></section>
                     <section className="inbox-reading-section recommendation"><small>RECOMMENDED NEXT ACTION</small><strong>{activeInboxAlert.recommendation}</strong></section>
+                    {activeInboxAlert.artifact && activeArtifactUrl && (
+                      <section className="inbox-artifact">
+                        <header><span><small>GENERATED CODE FILE</small><strong>{activeInboxAlert.artifact.filename}</strong></span><b>HTML</b></header>
+                        <iframe
+                          title={`Preview of ${activeInboxAlert.artifact.filename}`}
+                          src={activeArtifactUrl}
+                          sandbox="allow-scripts"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div>
+                          <a href={activeArtifactUrl} target="_blank" rel="noreferrer">OPEN HTML ↗</a>
+                          <a href={`${activeArtifactUrl}?download=true`}>DOWNLOAD FILE</a>
+                        </div>
+                      </section>
+                    )}
                     {activeInboxAlert.sources.length > 0 && (
                       <section className="inbox-reading-section"><small>SOURCES</small><ul className="inbox-sources">{activeInboxAlert.sources.map((source) => (
                         <li key={source}>{safeSourceUrl(source) ? <a href={safeSourceUrl(source)!} target="_blank" rel="noreferrer">{source}</a> : <span>{source}</span>}</li>
@@ -1179,6 +1214,14 @@ function App() {
         />
         <button className="dispatch-button" type="submit" disabled={questPending || !questText.trim() || connection !== 'online' || !apiKeyConfigured}>
           {questPending ? 'SENDING…' : 'SEND'}
+        </button>
+        <button
+          className="stop-agents-button"
+          type="button"
+          disabled={runningAgentCount === 0 || stopPending || connection !== 'online'}
+          onClick={() => void stopAllAgents()}
+        >
+          ■ {stopPending ? 'STOPPING…' : `STOP ${runningAgentCount || ''}`}
         </button>
         <button
           className="ship-button"

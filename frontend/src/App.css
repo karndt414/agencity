@@ -1922,6 +1922,21 @@ p { margin: 0; }
 
 .dispatch-button:disabled { cursor: not-allowed; filter: grayscale(0.45); opacity: 0.5; }
 
+.stop-agents-button {
+  height: 34px;
+  border: 2px solid #743c36;
+  padding: 0 8px;
+  background: #bd5948;
+  color: #fff1ce;
+  font: inherit;
+  font-size: 0.38rem;
+  font-weight: 950;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.stop-agents-button:not(:disabled) { animation: inbox-pulse 1s steps(2) infinite; }
+.stop-agents-button:disabled { cursor: not-allowed; filter: grayscale(0.65); opacity: 0.42; }
+
 .command-error {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -2230,6 +2245,22 @@ p { margin: 0; }
 .inbox-reading-section > strong { color: #58443a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
 .inbox-reading-section.recommendation { padding: 14px; border-left: 6px solid #628c72; background: #dce2b3; }
 .inbox-reading-section.recommendation > strong { color: #3f5b3f; }
+
+.inbox-artifact {
+  margin-top: 22px;
+  border: 4px solid #735448;
+  background: #d7b474;
+  box-shadow: 5px 5px 0 rgba(80, 55, 43, 0.22);
+}
+.inbox-artifact > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; border-bottom: 3px solid #735448; }
+.inbox-artifact > header span { display: grid; gap: 4px; min-width: 0; }
+.inbox-artifact > header small { color: #80523e; font-size: 0.33rem; font-weight: 950; letter-spacing: 0.08em; }
+.inbox-artifact > header strong { overflow: hidden; font-size: 0.52rem; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-artifact > header b { padding: 5px 7px; background: #5c7753; color: #fff0ca; font-size: 0.34rem; }
+.inbox-artifact iframe { display: block; width: 100%; height: 360px; border: 0; background: #fff; }
+.inbox-artifact > div { display: flex; justify-content: flex-end; gap: 8px; padding: 9px; border-top: 3px solid #735448; }
+.inbox-artifact a { border: 3px solid #65483e; padding: 7px 9px; background: #f2d491; color: #4e3931; font-size: 0.37rem; font-weight: 950; text-decoration: none; }
+.inbox-artifact a:first-child { background: #628c72; color: #fff1cf; }
 
 .inbox-sources { display: grid; gap: 6px; margin: 0; padding: 11px 11px 11px 28px; border: 3px solid #b89570; background: #f0dfb7; font: 0.58rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .inbox-sources a { display: block; overflow: hidden; color: #3f6651; text-overflow: ellipsis; white-space: nowrap; }

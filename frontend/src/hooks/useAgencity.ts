@@ -37,6 +37,11 @@ export type CreatureAlert = {
   impact: string
   recommendation: string
   sources: string[]
+  artifact?: {
+    filename: string
+    media_type: 'text/html'
+    url?: string | null
+  } | null
   phase?: string
   artifact_directory?: string | null
 }
@@ -119,6 +124,10 @@ async function errorMessage(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { detail?: unknown } | null
   if (typeof payload?.detail === 'string') return payload.detail
   return `Request failed with status ${response.status}`
+}
+
+function isRunStopped(cause: unknown): boolean {
+  return cause instanceof Error && cause.message === 'Run stopped by founder'
 }
 
 export function useAgencity() {
@@ -238,6 +247,29 @@ export function useAgencity() {
               message: event.phase === 'synthesis' ? 'Council synthesis complete!' : 'Found something useful!',
             }, 6000)
           }
+          if (event.state === 'idle') {
+            setActivities((current) => {
+              const next = { ...current }
+              delete next[event.creature!]
+              return next
+            })
+          }
+        }
+        if (event.type === 'runs_cancelled') {
+          if (collaborationTimer) window.clearTimeout(collaborationTimer)
+          setCollaboration(null)
+          setActivities({})
+          setStates((current) => Object.fromEntries(
+            Object.entries(current).map(([name, state]) => [
+              name,
+              state === 'hunting' ? 'idle' : state,
+            ]),
+          ))
+          setThoughts((current) => ({
+            ...current,
+            ...Object.fromEntries((event.creatures ?? []).map((name) => [name, 'Stopped by founder.'])),
+          }))
+          setError(null)
         }
         if (event.type === 'thought' && event.creature && event.token) {
           setThoughts((current) => ({
@@ -391,6 +423,10 @@ export function useAgencity() {
       await request(`/api/creatures/${encodeURIComponent(creature)}/hunt`, data ? { data } : undefined)
       setStates((current) => ({ ...current, [creature]: 'found' }))
     } catch (cause) {
+      if (isRunStopped(cause)) {
+        setStates((current) => ({ ...current, [creature]: 'idle' }))
+        return
+      }
       setStates((current) => ({ ...current, [creature]: 'error' }))
       setError(cause instanceof Error ? cause.message : 'Hunt failed')
     }
@@ -412,6 +448,13 @@ export function useAgencity() {
         ])),
       }))
     } catch (cause) {
+      if (isRunStopped(cause)) {
+        setStates((current) => ({
+          ...current,
+          ...Object.fromEntries(CORE_CREATURES.map((name) => [name, 'idle'])),
+        }))
+        return
+      }
       setStates((current) => ({
         ...current,
         ...Object.fromEntries(CORE_CREATURES.map((name) => [name, 'error'])),
@@ -451,6 +494,13 @@ export function useAgencity() {
         ])),
       }))
     } catch (cause) {
+      if (isRunStopped(cause)) {
+        setStates((current) => ({
+          ...current,
+          ...Object.fromEntries(selected.map((name) => [name, 'idle'])),
+        }))
+        return
+      }
       setStates((current) => ({
         ...current,
         ...Object.fromEntries(selected.map((name) => [name, 'error'])),
@@ -474,10 +524,28 @@ export function useAgencity() {
       })
       setStates((current) => ({ ...current, [creature]: 'found' }))
     } catch (cause) {
+      if (isRunStopped(cause)) {
+        setStates((current) => ({ ...current, [creature]: 'idle' }))
+        return
+      }
       setStates((current) => ({ ...current, [creature]: 'error' }))
       setError(cause instanceof Error ? cause.message : 'Refine failed')
       throw cause
     }
+  }, [request])
+
+  const stopAgents = useCallback(async () => {
+    const result = await request<{ stopped: number }>('/api/runs/cancel')
+    setCollaboration(null)
+    setActivities({})
+    setStates((current) => Object.fromEntries(
+      Object.entries(current).map(([name, state]) => [
+        name,
+        state === 'hunting' ? 'idle' : state,
+      ]),
+    ))
+    setError(null)
+    return result.stopped
   }, [request])
 
   const spawn = useCallback(async (
@@ -538,6 +606,7 @@ export function useAgencity() {
     reports,
     spawn,
     states,
+    stopAgents,
     thoughts,
     usage,
   }

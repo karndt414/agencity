@@ -8,7 +8,11 @@ from typing import Any, Awaitable, Callable
 from agents import Runner
 
 from .alert_pipeline import CreatureAlert, parse_alert
-from .artifacts import artifact_directory_for_task, artifact_location_instructions
+from .artifacts import (
+    artifact_directory_for_task,
+    artifact_location_instructions,
+    materialize_artifact,
+)
 from .config import ORCHESTRATOR_MODEL, WORKER_MODEL
 from .creatures import CREATURES, ORCHESTRATOR, get_creature, get_session, normalize_name
 from .reporting import TaskReport, enforce_citations, parse_task_report
@@ -191,6 +195,14 @@ async def _run(
             alert = parse_alert(result.final_output)
             if artifact_directory:
                 alert.artifact_directory = artifact_directory
+            if publish_alert:
+                alert = materialize_artifact(alert)
+        except asyncio.CancelledError:
+            await _emit(
+                sink,
+                {"type": "state", "creature": key, "state": "idle", "phase": phase},
+            )
+            raise
         except Exception as exc:
             await _emit(sink, {"type": "error", "creature": key, "error": str(exc)})
             raise
@@ -299,7 +311,9 @@ async def refine_hunt(
             f"{artifact_location_instructions(follow_up)}\n\n"
             "Search the live public web before answering. Treat any internal claims in "
             "session memory as unverified unless the founder explicitly supplied them, "
-            "and preserve exact supporting URLs in `sources`."
+            "and preserve exact supporting URLs in `sources`. If the follow-up asks you "
+            "to create, revise, or fix code, return the complete revised self-contained "
+            "HTML implementation in `artifact`, not merely instructions or a patch."
         ),
         sink,
         phase="refine",
@@ -330,7 +344,10 @@ async def direct_creature(
         "and the available data. Cite every factual claim with exact supporting URLs; "
         "if a supplied private record informs the answer, cite the supplied data "
         "reference below and label it as user-provided. Return the most actionable "
-        "structured alert supported by current evidence.\n\n"
+        "structured alert supported by current evidence. If the quest asks you to "
+        "code, build, or prototype, write the final workspace files and also return a "
+        "working self-contained HTML preview in `artifact`; do not substitute a plan, "
+        "code excerpt, or prose-only answer.\n\n"
         f"SUPPLIED DATA REFERENCE\n{_data_source_reference(name)}\n\n"
         f"{_internal_context(data)}"
     )
@@ -489,7 +506,9 @@ async def coordinate_room_quest(
         "specialist research below. Evaluate their evidence, resolve conflicts, fill any "
         "material gaps with live public web research, and publish one clear room-level "
         "answer. Preserve exact supporting URLs, distinguish fact from inference, and "
-        "take responsibility for the final prioritization.\n\n"
+        "take responsibility for the final prioritization. If the founder requested a "
+        "code deliverable, you must publish the complete working self-contained HTML in "
+        "your final `artifact`; supporting reports alone are not completion.\n\n"
         f"SUPPORTING REPORTS\n{json.dumps(support_reports, ensure_ascii=False, indent=2)}\n\n"
         f"{_internal_context(data_by_creature.get(pm, {}))}"
     )
@@ -608,7 +627,11 @@ async def collaborate_on_quest(
         "the most important claims before synthesizing. Every factual claim must retain "
         "an exact supporting URL or an explicit supplied-data/repository reference in "
         "the `sources` field. Treat peer claims without traceable sources as unverified "
-        "and omit them from the final answer.\n\n"
+        "and omit them from the final answer. You may use a handoff if a material gap "
+        "remains.\n\n"
+        "If the founder requested code, the coordinator must write the required workspace "
+        "files and return the complete working self-contained HTML preview in the final "
+        "`artifact`, not a plan or excerpt.\n\n"
         f"PEER REPORTS\n{json.dumps(peer_reports, ensure_ascii=False, indent=2)}"
     )
     try:
