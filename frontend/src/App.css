@@ -170,31 +170,6 @@ button {
   letter-spacing: 0.18em;
 }
 
-.office-entry {
-  position: absolute;
-  z-index: 5;
-  bottom: 0;
-  left: 50%;
-  display: flex;
-  width: 180px;
-  height: 36px;
-  align-items: center;
-  justify-content: space-around;
-  transform: translateX(-50%);
-  border: 4px solid #493229;
-  background: #dfbb7b;
-  box-shadow: 4px 4px 0 rgba(52, 39, 40, 0.8), inset 0 0 0 2px #f5dda7;
-  color: #67483a;
-  font-size: 0.55rem;
-  font-weight: 900;
-}
-
-.office-entry i {
-  width: 18px;
-  height: 4px;
-  background: #a57550;
-}
-
 .pixel-room {
   --room-accent: #826e9f;
   --room-soft: #cbbbe0;
@@ -317,17 +292,6 @@ button {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--room-soft) 55%, transparent);
 }
 
-.room-plaque small {
-  display: block;
-  margin-top: 4px;
-  color: var(--room-dark);
-  overflow: hidden;
-  font-size: 0.43rem;
-  letter-spacing: 0.08em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .room-rug {
   position: absolute;
   z-index: 0;
@@ -425,20 +389,6 @@ button {
   border: 4px solid #604032;
   background: #a76f49;
   box-shadow: inset 0 5px #c78a58, 4px 4px 0 rgba(73, 45, 35, 0.23);
-}
-
-.room-desk small {
-  position: absolute;
-  top: 8px;
-  right: 5px;
-  overflow: hidden;
-  max-width: 42%;
-  color: #f5d9a1;
-  font-size: 0.27rem;
-  font-weight: 950;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .desk-screen {
@@ -617,31 +567,6 @@ button {
   opacity: 0.72;
 }
 
-.character-name {
-  position: absolute;
-  top: -17px;
-  left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 4px;
-  transform: translateX(-50%);
-  border: 2px solid #5b4036;
-  background: rgba(255, 240, 202, 0.94);
-  color: #4e382f;
-  font-size: 0.32rem;
-  font-weight: 950;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.character-name b {
-  padding: 1px 2px;
-  background: var(--outfit);
-  color: #fff3d2;
-  font-size: 0.26rem;
-}
-
 .character-runtime {
   position: absolute;
   top: -34px;
@@ -770,7 +695,6 @@ button {
 .office-actor.actor-walking .pet-sprite { animation-duration: 0.64s; }
 .office-actor.actor-working .pet-sprite { animation-duration: 0.7s; }
 
-.actor-name,
 .actor-runtime {
   position: absolute;
   z-index: 4;
@@ -781,23 +705,6 @@ button {
   border: 2px solid #543a31;
   box-shadow: 2px 2px 0 rgba(67, 43, 34, 0.25);
   white-space: nowrap;
-}
-
-.actor-name {
-  top: 67px;
-  gap: 3px;
-  padding: 3px 4px;
-  background: #f5e3ba;
-  color: #4e382f;
-  font-size: 0.34rem;
-  font-weight: 950;
-}
-
-.actor-name b {
-  padding: 1px 2px;
-  background: var(--room-color, #806b9b);
-  color: #fff3d2;
-  font-size: 0.25rem;
 }
 
 .actor-runtime {
@@ -2490,7 +2397,6 @@ p { margin: 0; }
   .mission-agent h2 { font-size: 0.68rem; }
   .mission-card strong { font-size: 0.48rem; }
   .room-plaque { top: 8px; left: 8px; padding: 4px; }
-  .room-plaque small { display: none; }
   .pixel-character { transform: scale(0.78); transform-origin: bottom; }
   .pan-hint { display: none; }
   .alert-stack,

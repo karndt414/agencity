@@ -128,7 +128,6 @@ function OfficeActor({
     >
       {bubble && <span className="agent-bubble">{bubble}</span>}
       <span className="pet-sprite" />
-      <span className="actor-name">{member.name}<b>{member.level === 'pm' ? 'PM' : 'SUB'}</b></span>
       <span className={`actor-runtime ${runtimeAvailable ? 'is-live' : supporting ? 'is-supporting' : 'is-local'}`}><i />{runtimeLabel}</span>
     </div>
   )
@@ -166,7 +165,6 @@ function PixelWorkstation({
         <i className="desk-keyboard" />
         <i className="desk-leg desk-leg-left" />
         <i className="desk-leg desk-leg-right" />
-        <small>{member?.name ?? 'VACANT'}</small>
       </span>
       <span className="room-chair"><i /></span>
     </span>
@@ -252,7 +250,7 @@ function PixelRoom({
     >
       <span className="room-sunbeam" aria-hidden="true" />
       <span className="room-window" aria-hidden="true"><i /><i /><b /></span>
-      <span className="room-plaque"><i />{room.room}<small>{room.agent}</small></span>
+      <span className="room-plaque"><i />{room.room}</span>
       <span className="room-rug" aria-hidden="true"><i /></span>
       <span className="room-shelf" aria-hidden="true">
         <i /><i /><i /><i /><b /><b />
@@ -402,10 +400,6 @@ export default function PixelOffice({
           {rooms.map(renderRoom)}
           <div className="office-actors">{actors}</div>
         </div>
-      </div>
-
-      <div className="office-entry" aria-hidden="true">
-        <i /><span>LOBBY</span><i />
       </div>
     </section>
   )

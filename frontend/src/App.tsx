@@ -525,7 +525,7 @@ function App() {
               type="button"
             >
               <span className="agent-icon">{roomIcon(room)}</span>
-              <span className="agent-copy"><strong>{room.room}</strong><small>{room.agent} · {status}</small></span>
+              <span className="agent-copy"><strong>{room.room}</strong><small>{status}</small></span>
               <span className="agent-online" />
             </button>
           )
