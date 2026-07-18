@@ -16,6 +16,10 @@ export type CreatureAlert = {
 
 type ConnectionState = 'connecting' | 'online' | 'offline'
 
+type ReleaseAllResponse = {
+  results: Record<string, { status: 'found' | 'error'; error?: string }>
+}
+
 type CityEvent = {
   type: string
   creature?: string
@@ -62,7 +66,10 @@ export function useAgencity() {
           if (!response.ok) throw new Error(await errorMessage(response))
           return response.json() as Promise<{ api_key_configured: boolean }>
         })
-        .then((health) => setApiKeyConfigured(health.api_key_configured))
+        .then((health) => {
+          setApiKeyConfigured(health.api_key_configured)
+          setError(null)
+        })
         .catch((cause: unknown) => {
           if (cause instanceof DOMException && cause.name === 'AbortError') return
           setError(cause instanceof Error ? cause.message : 'Backend health check failed')
@@ -81,7 +88,13 @@ export function useAgencity() {
         checkHealth()
       })
       socket.addEventListener('message', (message) => {
-        const event = JSON.parse(String(message.data)) as CityEvent
+        let event: CityEvent
+        try {
+          event = JSON.parse(String(message.data)) as CityEvent
+        } catch {
+          setError('Received an invalid event from the backend')
+          return
+        }
 
         if (event.type === 'connected' && event.creatures) {
           setCreatures(event.creatures)
@@ -154,6 +167,7 @@ export function useAgencity() {
     setThoughts((current) => ({ ...current, [creature]: '' }))
     try {
       await request(`/api/creatures/${encodeURIComponent(creature)}/hunt`, data ? { data } : undefined)
+      setStates((current) => ({ ...current, [creature]: 'found' }))
     } catch (cause) {
       setStates((current) => ({ ...current, [creature]: 'error' }))
       setError(cause instanceof Error ? cause.message : 'Hunt failed')
@@ -167,8 +181,19 @@ export function useAgencity() {
       ...Object.fromEntries(CORE_CREATURES.map((name) => [name, 'hunting'])),
     }))
     try {
-      await request('/api/creatures/release-all')
+      const result = await request<ReleaseAllResponse>('/api/creatures/release-all')
+      setStates((current) => ({
+        ...current,
+        ...Object.fromEntries(CORE_CREATURES.map((name) => [
+          name,
+          result.results[name]?.status === 'found' ? 'found' : 'error',
+        ])),
+      }))
     } catch (cause) {
+      setStates((current) => ({
+        ...current,
+        ...Object.fromEntries(CORE_CREATURES.map((name) => [name, 'error'])),
+      }))
       setError(cause instanceof Error ? cause.message : 'Release all failed')
     }
   }, [request])
@@ -179,6 +204,7 @@ export function useAgencity() {
       await request(`/api/creatures/${encodeURIComponent(creature)}/refine`, {
         follow_up: 'Identify the single highest-impact next action and explain why.',
       })
+      setStates((current) => ({ ...current, [creature]: 'found' }))
     } catch (cause) {
       setStates((current) => ({ ...current, [creature]: 'error' }))
       setError(cause instanceof Error ? cause.message : 'Refine failed')
