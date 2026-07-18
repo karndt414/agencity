@@ -6,12 +6,13 @@ from typing import Any
 import agents
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .alert_pipeline import CreatureAlert
 from .config import has_openai_api_key
 from .creature_manager import (
     collaborate_on_quest,
+    coordinate_room_quest,
     direct_creatures,
     refine_hunt,
     release_all,
@@ -63,6 +64,7 @@ class SpawnRequest(BaseModel):
 class QuestRequest(BaseModel):
     quest: str
     target: str = "all"
+    supporters: list[str] = Field(default_factory=list)
     data: dict[str, Any] | None = None
 
 
@@ -180,6 +182,17 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         names = [target]
 
+    supporters = list(dict.fromkeys(
+        normalize_name(name)
+        for name in request.supporters
+        if normalize_name(name) != target
+    ))
+    for supporter in supporters:
+        try:
+            get_creature(supporter)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     data_by_creature = {
         name: (
             request.data
@@ -188,10 +201,22 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
         )
         for name in names
     }
+    for supporter in supporters:
+        data_by_creature[supporter] = request.data if request.data is not None else {}
     results = (
         await collaborate_on_quest(names, quest, data_by_creature, manager.broadcast)
         if target == "all"
-        else await direct_creatures(names, quest, data_by_creature, manager.broadcast)
+        else (
+            await coordinate_room_quest(
+                target,
+                supporters,
+                quest,
+                data_by_creature,
+                manager.broadcast,
+            )
+            if supporters
+            else await direct_creatures(names, quest, data_by_creature, manager.broadcast)
+        )
     )
     return {
         "quest": quest,

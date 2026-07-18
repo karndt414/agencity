@@ -259,6 +259,136 @@ def test_party_quest_routes_peer_reports_to_coordinator(monkeypatch) -> None:
     ]
 
 
+def test_room_pm_delegates_to_supporters_and_owns_final_answer(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    support_calls: list[tuple[str, str]] = []
+    synthesis_calls: list[tuple[str, str]] = []
+
+    async def fake_support(name, coordinator, quest, data, sink):
+        support_calls.append((name, coordinator))
+        return CreatureAlert(
+            headline=f"{name} support report",
+            details="Specialist evidence for the PM",
+            impact="Informs the final decision",
+            recommendation="Report to the PM",
+        )
+
+    async def fake_run(name, input_text, sink, phase, **kwargs):
+        synthesis_calls.append((name, phase))
+        assert "ROOM PM FINAL SYNTHESIS" in input_text
+        assert "SUPPORTING REPORTS" in input_text
+        return CreatureAlert(
+            headline="PM final answer",
+            details="The PM evaluated the supporting reports.",
+            impact="One accountable room decision",
+            recommendation="Execute the PM's plan",
+        )
+
+    async def sink(event):
+        events.append(event)
+
+    monkeypatch.setattr(creature_manager, "support_room_quest", fake_support)
+    monkeypatch.setattr(creature_manager, "_run", fake_run)
+    results = asyncio.run(
+        creature_manager.coordinate_room_quest(
+            "room-pm",
+            ["research-helper", "finance-helper"],
+            "Assess a new market",
+            {
+                "room-pm": {},
+                "research-helper": {},
+                "finance-helper": {},
+            },
+            sink,
+        )
+    )
+
+    assert support_calls == [
+        ("research-helper", "room-pm"),
+        ("finance-helper", "room-pm"),
+    ]
+    assert synthesis_calls == [("room-pm", "synthesis")]
+    assert results["room-pm"].headline == "PM final answer"
+    assert events[0] == {
+        "type": "collaboration_start",
+        "workflow": "room_hierarchy",
+        "quest": "Assess a new market",
+        "coordinator": "room-pm",
+        "participants": ["room-pm", "research-helper", "finance-helper"],
+    }
+    assert len([event for event in events if event["type"] == "collaboration"]) == 4
+    assert events[-1]["type"] == "collaboration_end"
+
+
+def test_supporting_run_is_not_published_as_room_answer(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_run(name, input_text, sink, phase, *, publish_alert=True):
+        captured.update(
+            name=name,
+            input_text=input_text,
+            phase=phase,
+            publish_alert=publish_alert,
+        )
+        return CreatureAlert(
+            headline="Internal support report",
+            details="Evidence for the PM only",
+            impact="Supports synthesis",
+            recommendation="Return to PM",
+        )
+
+    monkeypatch.setattr(creature_manager, "_run", fake_run)
+    asyncio.run(
+        creature_manager.support_room_quest(
+            "research-helper",
+            "room-pm",
+            "Assess a new market",
+            {},
+        )
+    )
+
+    assert captured["phase"] == "support"
+    assert captured["publish_alert"] is False
+    assert "supporting specialist, not the room decision-maker" in captured["input_text"]
+
+
+def test_room_quest_api_passes_supporters_to_fixed_pm(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_coordinate(coordinator, supporters, quest, data_by_creature, sink):
+        captured.update(
+            coordinator=coordinator,
+            supporters=supporters,
+            quest=quest,
+        )
+        return {
+            coordinator: CreatureAlert(
+                headline="PM final answer",
+                details="Synthesized support",
+                impact="Accountable",
+                recommendation="Proceed",
+            )
+        }
+
+    monkeypatch.setattr("backend.main.coordinate_room_quest", fake_coordinate)
+    response = TestClient(app).post(
+        "/api/quests",
+        json={
+            "quest": "Assess a new market",
+            "target": "pyre",
+            "supporters": ["sight", "fetch", "sight"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "coordinator": "pyre",
+        "supporters": ["sight", "fetch"],
+        "quest": "Assess a new market",
+    }
+    assert response.json()["results"]["pyre"]["alert"]["headline"] == "PM final answer"
+
+
 def test_usage_message_prices_cached_and_uncached_tokens() -> None:
     message = _usage_message(
         "pyre",

@@ -14,6 +14,7 @@ export type OfficeCollaboration = {
   phase: 'gathering' | 'meeting' | 'returning'
   participants: string[]
   coordinator?: string
+  workflow?: string
 }
 
 export type ApiUsage = {
@@ -62,6 +63,7 @@ type CityEvent = {
   headline?: string
   coordinator?: string
   participants?: string[]
+  workflow?: string
   model?: string
   input_tokens?: number
   cached_input_tokens?: number
@@ -238,15 +240,20 @@ export function useAgencity() {
             phase: 'gathering',
             participants: event.participants,
             coordinator: event.coordinator,
+            workflow: event.workflow,
           })
           event.participants.forEach((creature) => showActivity(creature, {
             mode: 'talking',
-            message: 'Heading to the Collaboration Hub…',
+            message: event.workflow === 'room_hierarchy'
+              ? 'Joining the PM’s room briefing…'
+              : 'Heading to the Collaboration Hub…',
           }))
           if (event.coordinator) {
             setThoughts((current) => ({
               ...current,
-              [event.coordinator!]: 'Reviewing the party’s specialist reports…',
+              [event.coordinator!]: event.workflow === 'room_hierarchy'
+                ? 'Delegating workstreams to the room’s subagents…'
+                : 'Reviewing the party’s specialist reports…',
             }))
           }
           collaborationTimer = window.setTimeout(() => {
@@ -369,8 +376,8 @@ export function useAgencity() {
     }
   }, [request])
 
-  const giveQuest = useCallback(async (quest: string, target: string) => {
-    const selected = target === 'all' ? creatures : [target]
+  const giveQuest = useCallback(async (quest: string, target: string, supporters: string[] = []) => {
+    const selected = target === 'all' ? creatures : [...new Set([target, ...supporters])]
     setError(null)
     setStates((current) => ({
       ...current,
@@ -382,7 +389,7 @@ export function useAgencity() {
     }))
 
     try {
-      const result = await request<QuestResponse>('/api/quests', { quest, target })
+      const result = await request<QuestResponse>('/api/quests', { quest, target, supporters })
       setStates((current) => ({
         ...current,
         ...Object.fromEntries(selected.map((name) => [

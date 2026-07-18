@@ -2180,6 +2180,8 @@ p { margin: 0; }
 .inbox-message.is-unread { background: #f0cf7c; }
 .inbox-message.is-unread.is-active { background: #fff0c7; }
 .inbox-message-meta { display: flex; justify-content: space-between; color: #916047; font-size: 0.31rem; text-transform: uppercase; }
+.inbox-message-meta b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-message-meta time { flex: none; margin-left: 8px; }
 .inbox-message > strong { padding-right: 12px; font-size: 0.5rem; line-height: 1.35; text-transform: uppercase; }
 .inbox-message > small { color: #816253; font-size: 0.34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox-message > i { position: absolute; top: 38px; right: 10px; width: 7px; height: 7px; background: #bd533f; animation: inbox-pulse 1s steps(2) infinite; }

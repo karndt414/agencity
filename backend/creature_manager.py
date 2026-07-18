@@ -156,6 +156,8 @@ async def _run(
     input_text: str,
     sink: EventSink | None,
     phase: str,
+    *,
+    publish_alert: bool = True,
 ) -> CreatureAlert:
     key = normalize_name(name)
     agent = get_creature(key)
@@ -183,10 +185,11 @@ async def _run(
             raise
 
     payload = alert.model_dump()
-    await _emit(
-        sink,
-        {"type": "alert", "creature": key, "phase": phase, "alert": payload},
-    )
+    if publish_alert:
+        await _emit(
+            sink,
+            {"type": "alert", "creature": key, "phase": phase, "alert": payload},
+        )
     await _emit(sink, {"type": "state", "creature": key, "state": "found", "phase": phase})
     return alert
 
@@ -269,6 +272,147 @@ async def direct_creatures(
         return_exceptions=True,
     )
     return dict(zip(names, results))
+
+
+async def support_room_quest(
+    name: str,
+    coordinator: str,
+    quest: str,
+    data: dict[str, Any],
+    sink: EventSink | None = None,
+) -> CreatureAlert:
+    """Research one delegated workstream without publishing a room-level answer."""
+
+    input_text = (
+        "DELEGATED SUPPORT ASSIGNMENT FROM YOUR ROOM PM\n"
+        f"Room PM: {coordinator}\n"
+        f"Founder quest: {quest.strip()}\n\n"
+        "You are a supporting specialist, not the room decision-maker. Search the live "
+        "public web for evidence in your specialty, cite exact URLs, and report concise "
+        "findings and risks back to your PM. Do not present your work as the room's final "
+        "answer; the PM will compare all supporting reports and make the final call.\n\n"
+        f"{_internal_context(data)}"
+    )
+    return await _run(
+        name,
+        input_text,
+        sink,
+        phase="support",
+        publish_alert=False,
+    )
+
+
+async def coordinate_room_quest(
+    coordinator: str,
+    supporters: list[str],
+    quest: str,
+    data_by_creature: dict[str, dict[str, Any]],
+    sink: EventSink | None = None,
+) -> dict[str, CreatureAlert | Exception]:
+    """Let a room PM delegate research and publish the room's final synthesis."""
+
+    pm = normalize_name(coordinator)
+    team = list(dict.fromkeys(
+        normalize_name(name)
+        for name in supporters
+        if normalize_name(name) != pm
+    ))
+    if not team:
+        result = await direct_creature(pm, quest, data_by_creature.get(pm, {}), sink)
+        return {pm: result}
+
+    participants = [pm, *team]
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_start",
+            "workflow": "room_hierarchy",
+            "quest": quest,
+            "coordinator": pm,
+            "participants": participants,
+        },
+    )
+    for supporter in team:
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": pm,
+                "to": supporter,
+                "headline": "Delegated a supporting research workstream",
+            },
+        )
+
+    support_results = await asyncio.gather(
+        *(
+            support_room_quest(
+                supporter,
+                pm,
+                quest,
+                data_by_creature.get(supporter, {}),
+                sink,
+            )
+            for supporter in team
+        ),
+        return_exceptions=True,
+    )
+    results: dict[str, CreatureAlert | Exception] = dict(zip(team, support_results))
+    reports = {
+        name: result
+        for name, result in results.items()
+        if isinstance(result, CreatureAlert)
+    }
+    for name, report in reports.items():
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": name,
+                "to": pm,
+                "headline": report.headline,
+            },
+        )
+
+    support_reports = {
+        name: report.model_dump()
+        for name, report in reports.items()
+    }
+    synthesis_input = (
+        "ROOM PM FINAL SYNTHESIS\n"
+        f"Founder quest: {quest.strip()}\n\n"
+        "You are the room PM and final decision-maker. Your subagents completed delegated "
+        "specialist research below. Evaluate their evidence, resolve conflicts, fill any "
+        "material gaps with live public web research, and publish one clear room-level "
+        "answer. Preserve exact supporting URLs, distinguish fact from inference, and "
+        "take responsibility for the final prioritization.\n\n"
+        f"SUPPORTING REPORTS\n{json.dumps(support_reports, ensure_ascii=False, indent=2)}\n\n"
+        f"{_internal_context(data_by_creature.get(pm, {}))}"
+    )
+    try:
+        results[pm] = await _run(pm, synthesis_input, sink, phase="synthesis")
+    except Exception as exc:
+        results[pm] = exc
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_error",
+                "coordinator": pm,
+                "participants": participants,
+                "error": str(exc),
+            },
+        )
+        return results
+
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_end",
+            "coordinator": pm,
+            "participants": participants,
+            "status": "found",
+        },
+    )
+    return results
 
 
 def select_quest_coordinator(quest: str, names: list[str]) -> str:
