@@ -183,6 +183,12 @@ async def _run(
             alert = parse_alert(result.final_output)
             if publish_alert:
                 alert = materialize_artifact(alert)
+        except asyncio.CancelledError:
+            await _emit(
+                sink,
+                {"type": "state", "creature": key, "state": "idle", "phase": phase},
+            )
+            raise
         except Exception as exc:
             await _emit(sink, {"type": "error", "creature": key, "error": str(exc)})
             raise

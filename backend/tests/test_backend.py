@@ -4,11 +4,14 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from agents import WebSearchTool
 
 import backend.creature_manager as creature_manager
 import backend.artifacts as artifact_module
+import backend.main as main_module
 import backend.spawn as spawn_module
 from backend.alert_pipeline import CreatureAlert, CreatureArtifact, parse_alert
 from backend.creatures import CREATURES
@@ -46,6 +49,99 @@ def test_websocket_connect_and_ping() -> None:
         assert connected["type"] == "connected"
         websocket.send_json({"type": "ping"})
         assert websocket.receive_json() == {"type": "pong"}
+
+
+def test_active_api_run_can_be_cancelled() -> None:
+    async def scenario() -> None:
+        started = asyncio.Event()
+        operation_finished = asyncio.Event()
+
+        async def operation() -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                operation_finished.set()
+
+        task = asyncio.create_task(main_module._tracked_run(operation()))
+        await started.wait()
+
+        assert main_module._cancel_active_runs() == 1
+        with pytest.raises(HTTPException) as stopped:
+            await task
+
+        assert stopped.value.status_code == 409
+        assert stopped.value.detail == "Run stopped by founder"
+        assert operation_finished.is_set()
+        assert not main_module._ACTIVE_RUN_TASKS
+
+    asyncio.run(scenario())
+
+
+def test_streaming_agent_returns_to_idle_when_cancelled(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    started = asyncio.Event()
+
+    class FakeStreamingResult:
+        async def stream_events(self):
+            started.set()
+            await asyncio.Event().wait()
+            if False:
+                yield None
+
+    monkeypatch.setattr(
+        creature_manager.Runner,
+        "run_streamed",
+        lambda *args, **kwargs: FakeStreamingResult(),
+    )
+
+    async def scenario() -> None:
+        async def sink(event):
+            events.append(event)
+
+        task = asyncio.create_task(
+            creature_manager._run("pyre", "A long quest", sink, "quest")
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+    assert events[0] == {
+        "type": "state",
+        "creature": "pyre",
+        "state": "hunting",
+        "phase": "quest",
+    }
+    assert events[-1] == {
+        "type": "state",
+        "creature": "pyre",
+        "state": "idle",
+        "phase": "quest",
+    }
+
+
+def test_cancel_endpoint_is_safe_when_no_agents_are_running() -> None:
+    response = TestClient(app).post("/api/runs/cancel")
+    assert response.status_code == 200
+    assert response.json() == {"status": "idle", "stopped": 0}
+
+
+def test_broadcast_drops_a_stale_websocket_instead_of_hanging() -> None:
+    manager = main_module.ConnectionManager()
+
+    class StaleWebSocket:
+        async def send_json(self, message):
+            await asyncio.Event().wait()
+
+    stale = StaleWebSocket()
+    manager.connections.add(stale)  # type: ignore[arg-type]
+
+    asyncio.run(manager.broadcast({"type": "runs_cancelled"}))
+
+    assert stale not in manager.connections
 
 
 def test_alert_pipeline_accepts_structured_json() -> None:

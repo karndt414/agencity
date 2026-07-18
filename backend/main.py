@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, TypeVar
 
 import agents
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -25,6 +26,31 @@ from .spawn import ensure_spawned_creature, restore_spawned_creatures, spawn_cre
 
 restore_spawned_creatures()
 
+RunResult = TypeVar("RunResult")
+_ACTIVE_RUN_TASKS: set[asyncio.Task[Any]] = set()
+
+
+async def _tracked_run(operation: Awaitable[RunResult]) -> RunResult:
+    """Track one top-level API run so the founder can cancel its entire task tree."""
+
+    task = asyncio.current_task()
+    if task is not None:
+        _ACTIVE_RUN_TASKS.add(task)
+    try:
+        return await operation
+    except asyncio.CancelledError as exc:
+        raise HTTPException(status_code=409, detail="Run stopped by founder") from exc
+    finally:
+        if task is not None:
+            _ACTIVE_RUN_TASKS.discard(task)
+
+
+def _cancel_active_runs() -> int:
+    tasks = [task for task in tuple(_ACTIVE_RUN_TASKS) if not task.done()]
+    for task in tasks:
+        task.cancel("Stopped by founder")
+    return len(tasks)
+
 
 class ConnectionManager:
     def __init__(self) -> None:
@@ -38,11 +64,13 @@ class ConnectionManager:
         self.connections.discard(websocket)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
-        for websocket in tuple(self.connections):
+        async def send(websocket: WebSocket) -> None:
             try:
-                await websocket.send_json(message)
+                await asyncio.wait_for(websocket.send_json(message), timeout=0.75)
             except Exception:
                 self.disconnect(websocket)
+
+        await asyncio.gather(*(send(websocket) for websocket in tuple(self.connections)))
 
 
 class HuntRequest(BaseModel):
@@ -99,6 +127,19 @@ async def list_creatures() -> dict[str, list[str]]:
     return {"creatures": sorted(CREATURES)}
 
 
+@app.post("/api/runs/cancel")
+async def cancel_runs_endpoint() -> dict[str, int | str]:
+    stopped = _cancel_active_runs()
+    await manager.broadcast(
+        {
+            "type": "runs_cancelled",
+            "creatures": sorted(CREATURES),
+            "stopped": stopped,
+        }
+    )
+    return {"status": "stopping" if stopped else "idle", "stopped": stopped}
+
+
 @app.get("/api/artifacts/{artifact_id}")
 async def artifact_endpoint(artifact_id: str, download: bool = False) -> Response:
     try:
@@ -128,7 +169,7 @@ async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict
         name: supplied.get(name, {})
         for name in CREATURES
     }
-    results = await release_all(data, manager.broadcast)
+    results = await _tracked_run(release_all(data, manager.broadcast))
     return {
         "results": {
             name: (
@@ -146,7 +187,7 @@ async def hunt_endpoint(name: str, request: HuntRequest | None = None) -> dict[s
     key = normalize_name(name)
     get_creature(key)
     data = request.data if request and request.data is not None else {}
-    alert = await run_hunt(key, data, manager.broadcast)
+    alert = await _tracked_run(run_hunt(key, data, manager.broadcast))
     return {"creature": key, "status": "found", "alert": alert.model_dump()}
 
 
@@ -154,7 +195,7 @@ async def hunt_endpoint(name: str, request: HuntRequest | None = None) -> dict[s
 async def refine_endpoint(name: str, request: RefineRequest) -> dict[str, Any]:
     key = normalize_name(name)
     get_creature(key)
-    alert = await refine_hunt(key, request.follow_up, manager.broadcast)
+    alert = await _tracked_run(refine_hunt(key, request.follow_up, manager.broadcast))
     return {"creature": key, "status": "found", "alert": alert.model_dump()}
 
 
@@ -227,11 +268,11 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
     }
     for supporter in supporters:
         data_by_creature[supporter] = request.data if request.data is not None else {}
-    results = (
-        await collaborate_on_quest(names, quest, data_by_creature, manager.broadcast)
+    operation = (
+        collaborate_on_quest(names, quest, data_by_creature, manager.broadcast)
         if target == "all"
         else (
-            await coordinate_room_quest(
+            coordinate_room_quest(
                 target,
                 supporters,
                 quest,
@@ -239,9 +280,10 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
                 manager.broadcast,
             )
             if supporters
-            else await direct_creatures(names, quest, data_by_creature, manager.broadcast)
+            else direct_creatures(names, quest, data_by_creature, manager.broadcast)
         )
     )
+    results = await _tracked_run(operation)
     return {
         "quest": quest,
         "target": target,

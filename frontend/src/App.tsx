@@ -125,6 +125,7 @@ function App() {
     releaseAll,
     spawn,
     states,
+    stopAgents,
     thoughts,
     usage,
   } = useAgencity()
@@ -147,6 +148,7 @@ function App() {
   const [questTarget, setQuestTarget] = useState('all')
   const [questError, setQuestError] = useState<string | null>(null)
   const [questPending, setQuestPending] = useState(false)
+  const [stopPending, setStopPending] = useState(false)
   const [lastQuest, setLastQuest] = useState<{ text: string; target: string } | null>(null)
   const [showSpawn, setShowSpawn] = useState(false)
   const [spawnRoomId, setSpawnRoomId] = useState('patch')
@@ -254,6 +256,7 @@ function App() {
   } as CSSProperties
 
   const totalAgents = rooms.reduce((sum, room) => sum + room.members.length, 0)
+  const runningAgentCount = Object.values(states).filter((state) => state === 'hunting').length
 
   const markAlertRead = useCallback((alertId: string) => {
     setReadAlertIds((current) => {
@@ -544,6 +547,15 @@ function App() {
       )
     } catch {
       // The agent hook exposes the specific runtime error in the system message area.
+    }
+  }
+
+  const stopAllAgents = async () => {
+    setStopPending(true)
+    try {
+      await stopAgents()
+    } finally {
+      setStopPending(false)
     }
   }
 
@@ -1179,6 +1191,14 @@ function App() {
         />
         <button className="dispatch-button" type="submit" disabled={questPending || !questText.trim() || connection !== 'online' || !apiKeyConfigured}>
           {questPending ? 'SENDING…' : 'SEND'}
+        </button>
+        <button
+          className="stop-agents-button"
+          type="button"
+          disabled={runningAgentCount === 0 || stopPending || connection !== 'online'}
+          onClick={() => void stopAllAgents()}
+        >
+          ■ {stopPending ? 'STOPPING…' : `STOP ${runningAgentCount || ''}`}
         </button>
         <button
           className="ship-button"
