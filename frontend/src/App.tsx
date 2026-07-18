@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import PixelOffice from './components/PixelOffice'
 import {
   ROOMS,
@@ -78,6 +86,16 @@ function isLongAlert(alert: {
   return alert.details.length + alert.recommendation.length > 420 || alert.sources.length > 3
 }
 
+type PanPoint = { x: number; y: number }
+
+type OfficeDrag = {
+  pointerId: number
+  startX: number
+  startY: number
+  origin: PanPoint
+  moved: boolean
+}
+
 function App() {
   const {
     alerts,
@@ -98,6 +116,10 @@ function App() {
   const [selectedRoomId, setSelectedRoomId] = useState('patch')
   const [focusedRoomId, setFocusedRoomId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState<PanPoint>({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const officeDrag = useRef<OfficeDrag | null>(null)
+  const suppressOfficeClick = useRef(false)
   const [showAddRoom, setShowAddRoom] = useState(false)
   const [roomName, setRoomName] = useState('Strategy Studio')
   const [roomPurpose, setRoomPurpose] = useState('Turn founder priorities into clear weekly plans.')
@@ -156,7 +178,54 @@ function App() {
   const handleFocusRoom = (room: RoomData) => {
     setSelectedRoomId(room.id)
     setFocusedRoomId(room.id)
+    setPan({ x: 0, y: 0 })
     setZoom((current) => Math.max(1.65, current))
+  }
+
+  const resetOfficeView = () => {
+    setFocusedRoomId(null)
+    setPan({ x: 0, y: 0 })
+    setZoom(1)
+  }
+
+  const handleOfficePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return
+    suppressOfficeClick.current = false
+    officeDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: pan,
+      moved: false,
+    }
+  }
+
+  const handleOfficePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = officeDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) return
+
+    if (!drag.moved) {
+      drag.moved = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setFocusedRoomId(null)
+      setIsPanning(true)
+    }
+    setPan({ x: drag.origin.x + deltaX, y: drag.origin.y + deltaY })
+  }
+
+  const finishOfficeDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = officeDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    suppressOfficeClick.current = drag.moved
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    officeDrag.current = null
+    setIsPanning(false)
   }
 
   const openRecruiter = (roomId = selectedRoomId) => {
@@ -169,6 +238,7 @@ function App() {
     const officeHeight = getOfficeHeight(rooms.length)
     const officeWidth = Math.max(window.innerWidth, 900)
     setFocusedRoomId(null)
+    setPan({ x: 0, y: 0 })
     setZoom(Math.min(1, Math.max(0.55,
       Math.min((window.innerHeight - 16) / officeHeight, (window.innerWidth - 16) / officeWidth),
     )))
@@ -266,6 +336,7 @@ function App() {
     setRooms((current) => [...current, room])
     setSelectedRoomId(id)
     setFocusedRoomId(id)
+    setPan({ x: 0, y: 0 })
     setZoom(1.65)
     setShowAddRoom(false)
   }
@@ -274,9 +345,20 @@ function App() {
     <main className="game-shell" style={roomStyle}>
       <div className="world-pixels" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
       <div
-        className="office-viewport"
+        className={`office-viewport ${isPanning ? 'is-panning' : ''}`}
+        onClickCapture={(event) => {
+          if (!suppressOfficeClick.current) return
+          event.preventDefault()
+          event.stopPropagation()
+          suppressOfficeClick.current = false
+        }}
+        onPointerCancel={finishOfficeDrag}
+        onPointerDown={handleOfficePointerDown}
+        onPointerMove={handleOfficePointerMove}
+        onPointerUp={finishOfficeDrag}
         onWheel={(event) => {
           event.preventDefault()
+          setFocusedRoomId(null)
           setZoom((current) => Math.min(2.25, Math.max(0.55, current - event.deltaY * 0.001)))
         }}
       >
@@ -287,14 +369,16 @@ function App() {
           onSelectRoom={handleFocusRoom}
           zoom={zoom}
           focusedRoomId={focusedRoomId}
+          pan={pan}
         />
       </div>
 
       <div className="zoom-hud pixel-panel" aria-label="Office zoom controls">
         <button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.55, value - 0.2))}>−</button>
-        <button className="zoom-readout" type="button" onClick={() => { setFocusedRoomId(null); setZoom(1) }}>{Math.round(zoom * 100)}%</button>
+        <button className="zoom-readout" type="button" onClick={resetOfficeView}>{Math.round(zoom * 100)}%</button>
         <button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2.25, value + 0.2))}>+</button>
         <button className="zoom-fit" type="button" onClick={fitOffice}>FIT</button>
+        <span className="pan-hint">DRAG TO PAN</span>
       </div>
 
       <header className="game-topbar">

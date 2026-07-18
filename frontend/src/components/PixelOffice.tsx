@@ -159,6 +159,7 @@ type PixelOfficeProps = {
   onSelectRoom: (room: RoomData) => void
   zoom: number
   focusedRoomId?: string | null
+  pan?: { x: number; y: number }
 }
 
 export default function PixelOffice({
@@ -168,6 +169,7 @@ export default function PixelOffice({
   onSelectRoom,
   zoom,
   focusedRoomId = null,
+  pan = { x: 0, y: 0 },
 }: PixelOfficeProps) {
   const officeRef = useRef<HTMLElement>(null)
   const [camera, setCamera] = useState({ x: 0, y: 0 })
@@ -220,7 +222,7 @@ export default function PixelOffice({
 
   const officeStyle = {
     '--office-height': `${officeHeight}px`,
-    transform: `matrix(${zoom}, 0, 0, ${zoom}, ${camera.x}, ${camera.y})`,
+    transform: `matrix(${zoom}, 0, 0, ${zoom}, ${camera.x + pan.x}, ${camera.y + pan.y})`,
   } as CSSProperties
 
   const renderRoom = (room: RoomData, index: number) => {

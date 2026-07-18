@@ -83,6 +83,17 @@ button {
   overflow: hidden;
   place-items: center;
   touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.office-viewport.is-panning,
+.office-viewport.is-panning * {
+  cursor: grabbing !important;
+}
+
+.office-viewport.is-panning .pixel-office {
+  transition: none;
 }
 
 .pixel-office {
@@ -1250,6 +1261,7 @@ p { margin: 0; }
   left: 220px;
   display: flex;
   padding: 4px;
+  align-items: center;
 }
 
 .zoom-hud button {
@@ -1267,6 +1279,16 @@ p { margin: 0; }
 .zoom-hud .zoom-readout { min-width: 52px; font-size: 0.4rem; }
 .zoom-hud .zoom-fit { min-width: 38px; font-size: 0.36rem; }
 .zoom-hud button:hover { background: #f8e9c4; }
+
+.pan-hint {
+  padding: 0 7px;
+  border-left: 2px solid #b89570;
+  color: #806151;
+  font-size: 0.34rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 
 .mission-hud {
   position: absolute;
@@ -1958,6 +1980,7 @@ p { margin: 0; }
   .room-plaque { top: 8px; left: 8px; padding: 4px; }
   .room-plaque small { display: none; }
   .pixel-character { transform: scale(0.78); transform-origin: bottom; }
+  .pan-hint { display: none; }
   .alert-stack,
   .alert-stack.has-long-output {
     top: 66px;
