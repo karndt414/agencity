@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import agents
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -12,6 +12,7 @@ from .alert_pipeline import CreatureAlert
 from .config import has_openai_api_key
 from .creature_manager import (
     DATA_FILES,
+    direct_creatures,
     load_data,
     refine_hunt,
     release_all,
@@ -56,6 +57,12 @@ class SpawnRequest(BaseModel):
     name: str
     instructions: str
     model: str | None = None
+
+
+class QuestRequest(BaseModel):
+    quest: str
+    target: str = "all"
+    data: dict[str, Any] | None = None
 
 
 manager = ConnectionManager()
@@ -132,6 +139,45 @@ async def spawn_endpoint(request: SpawnRequest) -> dict[str, str]:
         {"type": "spawned", "creature": key, "name": creature.name}
     )
     return {"creature": key, "name": creature.name}
+
+
+@app.post("/api/quests")
+async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
+    quest = request.quest.strip()
+    if not quest:
+        raise HTTPException(status_code=422, detail="Quest is required")
+
+    target = normalize_name(request.target)
+    if target == "all":
+        names = list(CREATURES)
+    else:
+        try:
+            get_creature(target)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        names = [target]
+
+    data_by_creature = {
+        name: (
+            request.data
+            if request.data is not None
+            else load_data(name) if name in DATA_FILES else {}
+        )
+        for name in names
+    }
+    results = await direct_creatures(names, quest, data_by_creature, manager.broadcast)
+    return {
+        "quest": quest,
+        "target": target,
+        "results": {
+            name: (
+                {"status": "found", "alert": value.model_dump()}
+                if isinstance(value, CreatureAlert)
+                else {"status": "error", "error": str(value)}
+            )
+            for name, value in results.items()
+        },
+    }
 
 
 @app.websocket("/ws")

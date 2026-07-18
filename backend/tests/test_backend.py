@@ -31,3 +31,43 @@ def test_alert_pipeline_accepts_structured_json() -> None:
     )
     assert isinstance(alert, CreatureAlert)
     assert alert.headline == "Unused SaaS"
+
+
+def test_quest_dispatches_to_existing_creature(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_direct_creatures(names, quest, data_by_creature, sink):
+        captured.update(
+            names=names,
+            quest=quest,
+            data_by_creature=data_by_creature,
+            sink=sink,
+        )
+        return {
+            names[0]: CreatureAlert(
+                headline="Quest complete",
+                details="Used the existing creature",
+                impact="Action identified",
+                recommendation="Proceed",
+            )
+        }
+
+    monkeypatch.setattr("backend.main.direct_creatures", fake_direct_creatures)
+    response = TestClient(app).post(
+        "/api/quests",
+        json={"quest": "Find our largest avoidable expense", "target": "pyre"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"]["pyre"]["status"] == "found"
+    assert captured["names"] == ["pyre"]
+    assert captured["quest"] == "Find our largest avoidable expense"
+    assert "transactions" in captured["data_by_creature"]["pyre"]
+
+
+def test_quest_rejects_unknown_target() -> None:
+    response = TestClient(app).post(
+        "/api/quests",
+        json={"quest": "Do something", "target": "missing-agent"},
+    )
+    assert response.status_code == 404

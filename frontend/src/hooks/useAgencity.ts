@@ -20,6 +20,10 @@ type ReleaseAllResponse = {
   results: Record<string, { status: 'found' | 'error'; error?: string }>
 }
 
+type QuestResponse = {
+  results: Record<string, { status: 'found' | 'error'; error?: string }>
+}
+
 type CityEvent = {
   type: string
   creature?: string
@@ -198,6 +202,38 @@ export function useAgencity() {
     }
   }, [request])
 
+  const giveQuest = useCallback(async (quest: string, target: string) => {
+    const selected = target === 'all' ? creatures : [target]
+    setError(null)
+    setStates((current) => ({
+      ...current,
+      ...Object.fromEntries(selected.map((name) => [name, 'hunting'])),
+    }))
+    setThoughts((current) => ({
+      ...current,
+      ...Object.fromEntries(selected.map((name) => [name, ''])),
+    }))
+
+    try {
+      const result = await request<QuestResponse>('/api/quests', { quest, target })
+      setStates((current) => ({
+        ...current,
+        ...Object.fromEntries(selected.map((name) => [
+          name,
+          result.results[name]?.status === 'found' ? 'found' : 'error',
+        ])),
+      }))
+    } catch (cause) {
+      setStates((current) => ({
+        ...current,
+        ...Object.fromEntries(selected.map((name) => [name, 'error'])),
+      }))
+      const message = cause instanceof Error ? cause.message : 'Quest dispatch failed'
+      setError(message)
+      throw cause
+    }
+  }, [creatures, request])
+
   const refine = useCallback(async (creature: string) => {
     setStates((current) => ({ ...current, [creature]: 'hunting' }))
     try {
@@ -236,6 +272,7 @@ export function useAgencity() {
     creatures,
     dismissAlert,
     error,
+    giveQuest,
     hunt,
     refine,
     releaseAll,

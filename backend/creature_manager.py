@@ -159,6 +159,46 @@ async def refine_hunt(
     return await _run(name, follow_up.strip(), sink, phase="refine")
 
 
+async def direct_creature(
+    name: str,
+    quest: str,
+    data: dict[str, Any],
+    sink: EventSink | None = None,
+) -> CreatureAlert:
+    """Give an existing creature a founder-authored quest with its available data."""
+
+    clean_quest = quest.strip()
+    if not clean_quest:
+        raise ValueError("Quest is required")
+
+    input_text = (
+        "NEW QUEST FROM THE FOUNDER\n"
+        f"{clean_quest}\n\n"
+        "Complete this quest using your specialty and the available data below. "
+        "Return the most actionable structured alert you can support.\n\n"
+        f"AVAILABLE DATA\n{json.dumps(data, ensure_ascii=False, indent=2)}"
+    )
+    return await _run(name, input_text, sink, phase="quest")
+
+
+async def direct_creatures(
+    names: list[str],
+    quest: str,
+    data_by_creature: dict[str, dict[str, Any]],
+    sink: EventSink | None = None,
+) -> dict[str, CreatureAlert | Exception]:
+    """Dispatch one quest to one or more existing creatures in parallel."""
+
+    results = await asyncio.gather(
+        *(
+            direct_creature(name, quest, data_by_creature.get(name, {}), sink)
+            for name in names
+        ),
+        return_exceptions=True,
+    )
+    return dict(zip(names, results))
+
+
 async def release_all(
     data_by_creature: dict[str, dict[str, Any]],
     sink: EventSink | None = None,

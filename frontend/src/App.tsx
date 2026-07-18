@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import PixelOffice from './components/PixelOffice'
 import { ROOMS, type RoomData } from './data/rooms'
 import { CORE_CREATURES, useAgencity, type CreatureState } from './hooks/useAgencity'
@@ -35,6 +35,7 @@ function App() {
     creatures,
     dismissAlert,
     error,
+    giveQuest,
     hunt,
     refine,
     releaseAll,
@@ -43,6 +44,12 @@ function App() {
     thoughts,
   } = useAgencity()
   const [selectedRoomId, setSelectedRoomId] = useState('patch')
+  const [showQuest, setShowQuest] = useState(false)
+  const [questText, setQuestText] = useState('')
+  const [questTarget, setQuestTarget] = useState('all')
+  const [questError, setQuestError] = useState<string | null>(null)
+  const [questPending, setQuestPending] = useState(false)
+  const [lastQuest, setLastQuest] = useState<{ text: string; target: string } | null>(null)
   const [showSpawn, setShowSpawn] = useState(false)
   const [spawnName, setSpawnName] = useState('Harbor')
   const [spawnInstructions, setSpawnInstructions] = useState(
@@ -67,6 +74,9 @@ function App() {
   const canRunSelected = Boolean(
     selectedCreature && connection === 'online' && apiKeyConfigured && selectedState !== 'hunting',
   )
+  const selectedQuest = lastQuest && selectedCreature && (
+    lastQuest.target === 'all' || lastQuest.target === selectedCreature
+  ) ? lastQuest.text : selectedRoom.task
 
   const roomStyle = {
     '--room-color': selectedRoom.color,
@@ -76,6 +86,39 @@ function App() {
   } as CSSProperties
 
   const handleSelectRoom = (room: RoomData) => setSelectedRoomId(room.id)
+
+  useEffect(() => {
+    const openQuestComposer = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setShowQuest(true)
+      }
+    }
+    window.addEventListener('keydown', openQuestComposer)
+    return () => window.removeEventListener('keydown', openQuestComposer)
+  }, [])
+
+  const submitQuest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const cleanQuest = questText.trim()
+    if (!cleanQuest) {
+      setQuestError('Describe the quest before dispatching it.')
+      return
+    }
+
+    setQuestPending(true)
+    setQuestError(null)
+    setLastQuest({ text: cleanQuest, target: questTarget })
+    try {
+      await giveQuest(cleanQuest, questTarget)
+      setQuestText('')
+      setShowQuest(false)
+    } catch (cause) {
+      setQuestError(cause instanceof Error ? cause.message : 'Could not dispatch quest')
+    } finally {
+      setQuestPending(false)
+    }
+  }
 
   const submitSpawn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -158,7 +201,7 @@ function App() {
         <div className="mission-role">{selectedRoom.role}</div>
         <div className="mission-card">
           <small>CURRENT QUEST</small>
-          <strong>{selectedRoom.task}</strong>
+          <strong>{selectedQuest}</strong>
           <div className="mission-progress"><i /></div>
           <span>{selectedProgress}% COMPLETE <em>{selectedState === 'hunting' ? 'LIVE' : '~8 MIN'}</em></span>
         </div>
@@ -203,6 +246,57 @@ function App() {
         ))}
       </section>
 
+      {showQuest && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !questPending && setShowQuest(false)}>
+          <section
+            className="spawn-modal quest-modal pixel-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quest-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span>PARTY COMMAND</span>
+              <button type="button" disabled={questPending} onClick={() => setShowQuest(false)}>×</button>
+            </header>
+            <h2 id="quest-title">GIVE THE PARTY A QUEST</h2>
+            <form onSubmit={(event) => void submitQuest(event)}>
+              <label>
+                ASSIGN TO
+                <select value={questTarget} onChange={(event) => setQuestTarget(event.target.value)}>
+                  <option value="all">ENTIRE PARTY</option>
+                  {creatures.map((creature) => (
+                    <option key={creature} value={creature}>{creature.toUpperCase()}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                QUEST
+                <textarea
+                  autoFocus
+                  placeholder="Example: Find the most urgent risk we should address this week."
+                  value={questText}
+                  onChange={(event) => setQuestText(event.target.value)}
+                />
+              </label>
+              <p className="quest-help">
+                The selected agents will use their existing specialty, seeded data, and session memory.
+              </p>
+              {questError && <p className="form-error" role="alert">{questError}</p>}
+              <div className="modal-actions">
+                <button type="button" disabled={questPending} onClick={() => setShowQuest(false)}>CANCEL</button>
+                <button
+                  type="submit"
+                  disabled={questPending || !apiKeyConfigured || connection !== 'online'}
+                >
+                  {questPending ? 'DISPATCHING…' : 'DISPATCH QUEST'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
       {showSpawn && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSpawn(false)}>
           <section
@@ -230,7 +324,9 @@ function App() {
 
       <footer className="command-hud pixel-panel">
         <div className="founder-avatar">S</div>
-        <button className="command-input" type="button" onClick={() => setShowSpawn(true)}><span>Give the party a new quest...</span><kbd>⌘K</kbd></button>
+        <button className="command-input" type="button" onClick={() => setShowQuest(true)}>
+          <span>{lastQuest?.text ?? 'Give the party a new quest...'}</span><kbd>⌘K</kbd>
+        </button>
         <button
           className="ship-button"
           type="button"

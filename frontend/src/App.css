@@ -1249,6 +1249,12 @@ h1 {
   text-align: left;
 }
 
+.command-input > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .command-input kbd {
   padding: 4px 5px;
   border: 2px solid #a88164;
@@ -1485,7 +1491,8 @@ h1 {
 }
 
 .spawn-modal input,
-.spawn-modal textarea {
+.spawn-modal textarea,
+.spawn-modal select {
   width: 100%;
   border: 3px solid #80604e;
   padding: 8px;
@@ -1502,9 +1509,20 @@ h1 {
 }
 
 .spawn-modal input:focus,
-.spawn-modal textarea:focus {
+.spawn-modal textarea:focus,
+.spawn-modal select:focus {
   outline: 3px solid var(--room-soft);
   outline-offset: -6px;
+}
+
+.quest-modal textarea {
+  min-height: 120px;
+}
+
+.quest-help {
+  color: #856653;
+  font-size: 0.42rem;
+  line-height: 1.6;
 }
 
 .form-error {
