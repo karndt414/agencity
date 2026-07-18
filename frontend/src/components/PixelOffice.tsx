@@ -1,6 +1,6 @@
 import { SUPPORT_ACTIONS, getOfficeHeight, type AgentKind, type RoomData, type RoomMember } from '../data/rooms'
 import { type CSSProperties } from 'react'
-import type { CreatureState } from '../hooks/useAgencity'
+import type { CollaborationState, CreatureState } from '../hooks/useAgencity'
 
 const gadgetLabel: Record<AgentKind, string> = {
   finance: 'BURN',
@@ -87,16 +87,18 @@ function PixelWorkstation({
   agentState,
   runtimeAvailable,
   supporting,
+  atCouncil,
 }: {
   member?: RoomMember
   index: number
   agentState?: CreatureState
   runtimeAvailable: boolean
   supporting: boolean
+  atCouncil: boolean
 }) {
   return (
     <span
-      className={`room-workstation workstation-slot-${index + 1} ${member ? '' : 'is-vacant'} ${supporting ? 'is-supporting' : ''}`}
+      className={`room-workstation workstation-slot-${index + 1} ${member ? '' : 'is-vacant'} ${supporting ? 'is-supporting' : ''} ${atCouncil ? 'is-at-council' : ''}`}
       data-desk-owner={member?.name ?? 'Vacant'}
       aria-hidden="true"
     >
@@ -121,9 +123,24 @@ function PixelWorkstation({
   )
 }
 
-function CollaborationRoom() {
+type CouncilParticipant = {
+  creature: string
+  member: RoomMember
+  room: RoomData
+  coordinator: boolean
+}
+
+function CollaborationRoom({
+  participants,
+  phase,
+}: {
+  participants: CouncilParticipant[]
+  phase?: CollaborationState['phase']
+}) {
+  const visibleParticipants = participants.slice(0, 6)
+
   return (
-    <div className="office-corridor collaboration-room" aria-hidden="true">
+    <div className={`office-corridor collaboration-room ${participants.length > 0 ? 'is-active' : ''}`} aria-hidden="true">
       <div className="meeting-whiteboard">
         <small>FOUNDER SYNC</small>
         <i /><i /><i />
@@ -137,7 +154,36 @@ function CollaborationRoom() {
         <i className="meeting-notes" />
         <i className="meeting-coffee" />
       </div>
+      {visibleParticipants.length > 0 && (
+        <div className="council-sprites">
+          {visibleParticipants.map((participant, participantIndex) => (
+            <div
+              className={`council-sprite phase-${phase ?? 'meeting'} ${participant.coordinator ? 'is-coordinator' : ''}`}
+              key={participant.creature}
+              style={{
+                '--council-index': participantIndex,
+                '--room-accent': participant.room.color,
+                '--room-soft': participant.room.softColor,
+                '--room-dark': participant.room.darkColor,
+              } as CSSProperties}
+            >
+              <PixelCharacter
+                member={participant.member}
+                index={0}
+                agentState="hunting"
+                runtimeAvailable
+                supporting={false}
+              />
+              <b className="council-role">{participant.coordinator ? 'LEADING' : 'SHARING'}</b>
+            </div>
+          ))}
+          {participants.length > visibleParticipants.length && (
+            <span className="council-overflow">+{participants.length - visibleParticipants.length}</span>
+          )}
+        </div>
+      )}
       <span className="corridor-label">COLLABORATION HUB<small>CROSS-AGENT MEETING ROOM</small></span>
+      {participants.length > 0 && <span className="council-status">COUNCIL IN SESSION</span>}
       <PixelPlant className="corridor-plant plant-left" />
       <PixelPlant className="corridor-plant plant-right" />
       <span className="water-cooler"><i /><b /></span>
@@ -151,6 +197,7 @@ function PixelRoom({
   selected,
   agentStates,
   availableCreatures,
+  councilParticipants,
   onSelect,
 }: {
   room: RoomData
@@ -158,6 +205,7 @@ function PixelRoom({
   selected: boolean
   agentStates: Record<string, CreatureState>
   availableCreatures: Set<string>
+  councilParticipants: Set<string>
   onSelect: () => void
 }) {
   const runtimeMembers = room.members.filter((member) => (
@@ -217,6 +265,9 @@ function PixelRoom({
             && member?.level === 'subagent'
             && !member.backendCreature,
           )
+          const atCouncil = Boolean(
+            member?.backendCreature && councilParticipants.has(member.backendCreature),
+          )
           return (
             <PixelWorkstation
               key={member?.id ?? 'vacant'}
@@ -225,6 +276,7 @@ function PixelRoom({
               runtimeAvailable={runtimeAvailable}
               agentState={runtimeAvailable ? agentStates[member!.backendCreature!] : undefined}
               supporting={supporting}
+              atCouncil={atCouncil}
             />
           )
         })}
@@ -244,6 +296,7 @@ type PixelOfficeProps = {
   availableCreatures?: string[]
   camera: { x: number; y: number }
   isPanning?: boolean
+  collaboration?: CollaborationState | null
 }
 
 const RING_POSITIONS = [
@@ -271,9 +324,27 @@ export default function PixelOffice({
   availableCreatures = [],
   camera,
   isPanning = false,
+  collaboration = null,
 }: PixelOfficeProps) {
   const officeHeight = getOfficeHeight(rooms.length)
   const availableCreatureSet = new Set(availableCreatures)
+  const councilParticipantSet = new Set(collaboration?.participants ?? [])
+  const councilParticipants = (collaboration?.participants ?? []).flatMap((creature) => {
+    const room = rooms.find((candidate) => (
+      candidate.id === creature
+      || candidate.members.some((member) => member.backendCreature === creature)
+    ))
+    if (!room) return []
+    const member = room.members.find((candidate) => candidate.backendCreature === creature)
+      ?? room.members.find((candidate) => candidate.level === 'pm')
+    if (!member) return []
+    return [{
+      creature,
+      member,
+      room,
+      coordinator: collaboration?.coordinator === creature,
+    }]
+  })
 
   const officeStyle = {
     '--office-height': `${officeHeight}px`,
@@ -289,6 +360,7 @@ export default function PixelOffice({
         selected={selectedRoomId === room.id}
         agentStates={agentStates}
         availableCreatures={availableCreatureSet}
+        councilParticipants={councilParticipantSet}
         onSelect={() => onSelectRoom(room)}
       />
     )
@@ -298,7 +370,7 @@ export default function PixelOffice({
     <section className={`pixel-office ${isPanning ? 'is-panning' : ''}`} style={officeStyle} aria-label="Interactive Agencity office floor plan">
       <div className="office-building">
         <div className="office-plan">
-          <CollaborationRoom />
+          <CollaborationRoom participants={councilParticipants} phase={collaboration?.phase} />
           {rooms.map(renderRoom)}
         </div>
       </div>

@@ -94,6 +94,7 @@ function App() {
     alerts,
     apiKeyConfigured,
     connection,
+    collaboration,
     creatures,
     dismissAlert,
     error,
@@ -482,6 +483,7 @@ function App() {
           availableCreatures={creatures}
           camera={camera}
           isPanning={isPanning}
+          collaboration={collaboration}
         />
       </div>
 

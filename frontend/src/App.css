@@ -722,6 +722,16 @@ button {
 .room-workstation.is-supporting .desk-screen b:nth-child(2) { animation-delay: -0.25s; }
 .room-workstation.is-supporting .desk-screen b:nth-child(3) { animation-delay: -0.5s; }
 
+.room-workstation.is-at-council .pixel-character {
+  opacity: 0;
+  transform: translateY(14px) scale(0.65);
+  transition: opacity 160ms steps(2), transform 240ms steps(4);
+}
+
+.room-workstation.is-at-council .room-chair {
+  filter: brightness(0.82);
+}
+
 .room-team-count {
   position: absolute;
   z-index: 7;
@@ -979,6 +989,110 @@ button {
     linear-gradient(rgba(121, 85, 57, 0.12) 2px, transparent 2px),
     radial-gradient(circle at 50% 50%, rgba(255, 232, 171, 0.34), transparent 52%);
   background-size: 34px 34px, 34px 34px, auto;
+}
+
+.collaboration-room.is-active {
+  box-shadow:
+    inset 0 0 0 3px #f2dfb5,
+    inset 0 0 34px rgba(255, 219, 116, 0.38),
+    0 0 16px rgba(230, 164, 74, 0.54);
+  animation: council-room-pulse 1.1s steps(2) infinite;
+}
+
+.collaboration-room.is-active .meeting-whiteboard { opacity: 0.32; }
+
+.council-sprites {
+  position: absolute;
+  z-index: 9;
+  inset: 0;
+  pointer-events: none;
+}
+
+.council-sprite {
+  --entry-x: -260px;
+  --entry-y: -180px;
+  position: absolute;
+  width: 52px;
+  height: 70px;
+  animation: council-enter 760ms steps(8) calc(var(--council-index) * 85ms) both;
+}
+
+.council-sprite.phase-leaving {
+  animation: council-leave 680ms steps(7) calc(var(--council-index) * 45ms) both;
+}
+
+.council-sprite:nth-child(1) { top: 43px; left: 42%; --entry-x: -330px; --entry-y: -220px; }
+.council-sprite:nth-child(2) { top: 43px; right: 16%; --entry-x: 330px; --entry-y: -220px; }
+.council-sprite:nth-child(3) { bottom: 20px; left: 42%; --entry-x: -330px; --entry-y: 220px; }
+.council-sprite:nth-child(4) { right: 16%; bottom: 20px; --entry-x: 330px; --entry-y: 220px; }
+.council-sprite:nth-child(5) { top: 106px; left: 7%; --entry-x: -360px; --entry-y: 0; }
+.council-sprite:nth-child(6) { top: 106px; right: 2%; --entry-x: 360px; --entry-y: 0; }
+
+.council-sprite .pixel-character,
+.council-sprite .pixel-character.is-pm,
+.council-sprite .pixel-character.character-slot-1 {
+  right: auto;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+  scale: 0.62;
+  transform-origin: bottom center;
+}
+
+.council-sprite .character-runtime { top: -37px; }
+
+.council-sprite.is-coordinator .pixel-character {
+  filter: drop-shadow(0 0 9px #ffe07a) drop-shadow(0 0 4px #d47a3d);
+}
+
+.council-role {
+  position: absolute;
+  z-index: 12;
+  right: -4px;
+  bottom: -2px;
+  left: -4px;
+  padding: 2px 3px;
+  border: 2px solid #65463a;
+  background: #e4c68b;
+  color: #6e4d3e;
+  font-size: 0.25rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.council-sprite.is-coordinator .council-role {
+  background: #f1b85a;
+  color: #593929;
+}
+
+.council-status {
+  position: absolute;
+  z-index: 11;
+  bottom: 6px;
+  left: 50%;
+  padding: 3px 6px;
+  transform: translateX(-50%);
+  border: 2px solid #68483a;
+  background: #f0c86f;
+  color: #684332;
+  font-size: 0.28rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  animation: hunting-blink 0.8s steps(2) infinite;
+}
+
+.council-overflow {
+  position: absolute;
+  z-index: 12;
+  right: 6px;
+  bottom: 6px;
+  padding: 4px;
+  border: 2px solid #68483a;
+  background: #f0c86f;
+  color: #684332;
+  font-size: 0.31rem;
+  font-weight: 950;
 }
 
 .meeting-whiteboard {
@@ -2123,6 +2237,24 @@ p { margin: 0; }
   50%, 100% { filter: brightness(1.14) saturate(1.08); }
 }
 
+@keyframes council-enter {
+  0% { opacity: 0; transform: translate(var(--entry-x), var(--entry-y)) scale(0.72); }
+  18% { opacity: 1; }
+  82% { transform: translate(0, 5px) scale(1); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+
+@keyframes council-leave {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  18% { transform: translate(0, 5px) scale(1); }
+  100% { opacity: 0; transform: translate(var(--entry-x), var(--entry-y)) scale(0.72); }
+}
+
+@keyframes council-room-pulse {
+  0%, 49% { filter: brightness(1); }
+  50%, 100% { filter: brightness(1.08) saturate(1.08); }
+}
+
 @keyframes alert-arrive {
   from { transform: translateX(24px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -2235,5 +2367,8 @@ p { margin: 0; }
   .roster-runtime em i,
   .support-pixels i,
   .room-workstation.is-supporting .desk-screen b,
+  .collaboration-room,
+  .council-sprite,
+  .council-status,
   .alert-card { animation: none; }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export const CORE_CREATURES = ['pyre', 'fetch', 'sight', 'lode'] as const
 
@@ -26,6 +26,12 @@ export type CreatureAlert = {
   phase?: string
 }
 
+export type CollaborationState = {
+  participants: string[]
+  coordinator: string
+  phase: 'meeting' | 'leaving'
+}
+
 type ConnectionState = 'connecting' | 'online' | 'offline'
 
 type ReleaseAllResponse = {
@@ -48,6 +54,7 @@ type CityEvent = {
   to?: string
   headline?: string
   coordinator?: string
+  participants?: string[]
   model?: string
   input_tokens?: number
   cached_input_tokens?: number
@@ -82,6 +89,8 @@ export function useAgencity() {
   const [alerts, setAlerts] = useState<CreatureAlert[]>([])
   const [thoughts, setThoughts] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  const [collaboration, setCollaboration] = useState<CollaborationState | null>(null)
+  const collaborationExitTimer = useRef<number | undefined>(undefined)
   const [usage, setUsage] = useState<ApiUsage>({
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -168,10 +177,24 @@ export function useAgencity() {
           }))
         }
         if (event.type === 'collaboration_start' && event.coordinator) {
+          if (collaborationExitTimer.current) window.clearTimeout(collaborationExitTimer.current)
+          setCollaboration({
+            coordinator: event.coordinator,
+            participants: event.participants ?? [],
+            phase: 'meeting',
+          })
           setThoughts((current) => ({
             ...current,
             [event.coordinator!]: 'Reviewing the party’s specialist reports…',
           }))
+        }
+        if (event.type === 'collaboration_end' || event.type === 'collaboration_error') {
+          setCollaboration((current) => current ? { ...current, phase: 'leaving' } : null)
+          if (collaborationExitTimer.current) window.clearTimeout(collaborationExitTimer.current)
+          collaborationExitTimer.current = window.setTimeout(() => {
+            setCollaboration(null)
+            collaborationExitTimer.current = undefined
+          }, 900)
         }
         if (event.type === 'usage') {
           setUsage((current) => ({
@@ -206,8 +229,14 @@ export function useAgencity() {
         }
       })
       socket.addEventListener('close', () => {
+        if (!active) return
         setConnection('offline')
-        if (active) retryTimer = window.setTimeout(connect, 1500)
+        setCollaboration(null)
+        if (collaborationExitTimer.current) {
+          window.clearTimeout(collaborationExitTimer.current)
+          collaborationExitTimer.current = undefined
+        }
+        retryTimer = window.setTimeout(connect, 1500)
       })
       socket.addEventListener('error', () => socket?.close())
     }
@@ -217,6 +246,7 @@ export function useAgencity() {
       active = false
       controller.abort()
       if (retryTimer) window.clearTimeout(retryTimer)
+      if (collaborationExitTimer.current) window.clearTimeout(collaborationExitTimer.current)
       socket?.close()
     }
   }, [])
@@ -344,6 +374,7 @@ export function useAgencity() {
     alerts,
     apiKeyConfigured,
     connection,
+    collaboration,
     creatures,
     dismissAlert,
     error,

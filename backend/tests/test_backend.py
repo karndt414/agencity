@@ -134,6 +134,9 @@ def test_party_quest_routes_peer_reports_to_coordinator(monkeypatch) -> None:
     assert synthesis_calls == [("pyre", "synthesis")]
     assert results["pyre"].headline == "Party synthesis"
     assert len([event for event in events if event["type"] == "collaboration"]) == 3
+    council_end = next(event for event in events if event["type"] == "collaboration_end")
+    assert council_end["coordinator"] == "pyre"
+    assert council_end["participants"] == names
 
 
 def test_usage_message_prices_cached_and_uncached_tokens() -> None:
