@@ -1,0 +1,7 @@
+{
+  "signals": [
+    {"company": "AgentStack", "event": "raised funding", "amount": 6200000, "days_ago": 0, "source": "demo seed"},
+    {"company": "SignalForge", "event": "hired head of growth", "days_ago": 3, "source": "demo seed"},
+    {"company": "RelayOS", "event": "launched workflow product", "days_ago": 8, "source": "demo seed"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "runway_months": 4.2,
+  "transactions": [
+    {"merchant": "Mixpanel", "amount_monthly": 350, "last_used_days": 74, "category": "analytics"},
+    {"merchant": "Typeform", "amount_monthly": 89, "last_used_days": 95, "category": "forms"},
+    {"merchant": "Figma", "amount_monthly": 75, "last_used_days": 120, "category": "design", "note": "former intern seat"}
+  ]
+}

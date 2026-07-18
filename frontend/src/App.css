@@ -1,0 +1,161 @@
+.app-shell {
+  width: min(1440px, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 24px clamp(18px, 4vw, 64px) 18px;
+  background:
+    radial-gradient(circle at 50% 15%, rgba(11, 54, 83, 0.25), transparent 42%),
+    #03070d;
+}
+
+.topbar,
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.topbar {
+  min-height: 70px;
+}
+
+.eyebrow,
+.connection-status,
+.statusbar,
+.scene-caption {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: #4f7790;
+  font-size: 0.64rem;
+}
+
+h1 {
+  margin: 0;
+  color: #ecf8ff;
+  font-size: clamp(1.55rem, 3vw, 2.2rem);
+  font-weight: 650;
+  letter-spacing: 0.24em;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #69c9a2;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #66e0a7;
+  box-shadow: 0 0 13px #66e0a7;
+}
+
+.city-panel {
+  position: relative;
+  height: min(74vh, 720px);
+  min-height: 470px;
+  margin-top: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(52, 125, 158, 0.45);
+  border-radius: 5px;
+  background: #020811;
+  box-shadow: 0 0 70px rgba(4, 109, 156, 0.14), inset 0 0 100px rgba(0, 25, 43, 0.5);
+}
+
+.city-panel::before,
+.city-panel::after {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  color: rgba(98, 178, 205, 0.5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6rem;
+}
+
+.city-panel::before {
+  top: 13px;
+  left: 15px;
+  content: 'LIVE / ORBITAL VIEW';
+  letter-spacing: 0.12em;
+}
+
+.city-panel::after {
+  right: 15px;
+  bottom: 13px;
+  content: 'LAT 36.08 · LON -94.16';
+  letter-spacing: 0.08em;
+}
+
+.scene-caption {
+  position: absolute;
+  bottom: 21px;
+  left: 25px;
+  display: grid;
+  gap: 4px;
+  color: #71a4b8;
+  font-size: 0.6rem;
+  pointer-events: none;
+}
+
+.scene-caption strong {
+  color: #d9f4ff;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+}
+
+.scene-caption small {
+  color: #557487;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.statusbar {
+  min-height: 54px;
+  color: #5d7c8c;
+  font-size: 0.62rem;
+}
+
+.statusbar b {
+  color: #b9ddeb;
+  font-weight: 500;
+}
+
+.statusbar-message {
+  color: #456473;
+}
+
+@media (max-width: 620px) {
+  .app-shell {
+    padding: 15px 12px 10px;
+  }
+
+  .connection-status {
+    font-size: 0.56rem;
+  }
+
+  .city-panel {
+    min-height: 420px;
+    height: 68vh;
+  }
+
+  .statusbar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px 16px;
+  }
+
+  .statusbar-message {
+    flex-basis: 100%;
+  }
+}

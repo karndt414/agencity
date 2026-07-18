@@ -1,0 +1,7 @@
+{
+  "candidates": [
+    {"name": "Maya Chen", "role": "founding engineer", "strengths": ["distributed systems", "developer tools"], "warm_intro": "Jordan Lee"},
+    {"name": "Theo Brooks", "role": "founding engineer", "strengths": ["computer vision", "edge AI"], "warm_intro": "Priya Shah"},
+    {"name": "Sam Rivera", "role": "product engineer", "strengths": ["React", "analytics"], "warm_intro": null}
+  ]
+}

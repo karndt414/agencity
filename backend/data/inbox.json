@@ -1,0 +1,7 @@
+{
+  "threads": [
+    {"from": "a16z", "subject": "Follow-up: partner intro", "days_waiting": 11, "status": "drafted"},
+    {"from": "Acme Design", "subject": "Pilot feedback", "days_waiting": 4, "status": "unread"},
+    {"from": "Jordan Lee", "subject": "Founding engineer referral", "days_waiting": 2, "status": "unread"}
+  ]
+}
