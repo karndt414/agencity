@@ -24,6 +24,7 @@ class TaskReport(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    artifact_directory: str | None = None
 
 
 def _dedupe_sources(sources: list[str]) -> list[str]:
@@ -94,9 +95,18 @@ def render_task_report(report: TaskReport) -> str:
         "",
         report.summary,
         "",
-        "## Findings",
-        "",
     ]
+    if report.artifact_directory:
+        lines.extend(
+            [
+                "## Artifact location",
+                "",
+                f"`{report.artifact_directory}/`",
+                f"Entry point: `{report.artifact_directory}/index.html`",
+                "",
+            ]
+        )
+    lines.extend(["## Findings", ""])
 
     if report.findings:
         for finding in report.findings:

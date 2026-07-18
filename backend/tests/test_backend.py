@@ -13,6 +13,12 @@ from agents import WebSearchTool
 import backend.creature_manager as creature_manager
 import backend.spawn as spawn_module
 from backend.alert_pipeline import CreatureAlert, parse_alert
+from backend.artifacts import (
+    artifact_directory_for_task,
+    artifact_entrypoint_for_task,
+    artifact_location_instructions,
+    is_website_task,
+)
 from backend.config import ORCHESTRATOR_MODEL, WORKER_MODEL
 from backend.creatures import CREATURES, ORCHESTRATOR
 from backend.creature_manager import _internal_context, _usage_message, select_quest_coordinator
@@ -90,6 +96,20 @@ def test_worker_and_orchestrator_models_are_separate() -> None:
     assert ORCHESTRATOR.model == ORCHESTRATOR_MODEL
 
 
+def test_website_tasks_have_one_predictable_artifact_location() -> None:
+    task = "Create a website about balcony gardening for beginners"
+
+    assert is_website_task(task) is True
+    assert artifact_directory_for_task(task) == (
+        "artifacts/create-a-website-about-balcony-gardening-for-beginners"
+    )
+    assert artifact_entrypoint_for_task(task).endswith("/index.html")
+    instructions = artifact_location_instructions(task)
+    assert "artifacts/create-a-website-about-balcony-gardening-for-beginners/" in instructions
+    assert "index.html" in instructions
+    assert is_website_task("Research current gardening benchmarks") is False
+
+
 def test_workspace_writer_creates_non_executable_text_file() -> None:
     path = "backend/data/.codex-tool-test.md"
     try:
@@ -125,7 +145,7 @@ def test_alert_pipeline_accepts_structured_json() -> None:
 def test_quest_dispatches_to_existing_creature(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_direct_creatures(names, quest, data_by_creature, sink):
+    async def fake_direct_creatures(names, quest, data_by_creature, sink, **kwargs):
         captured.update(
             names=names,
             quest=quest,
@@ -152,6 +172,37 @@ def test_quest_dispatches_to_existing_creature(monkeypatch) -> None:
     assert captured["names"] == ["pyre"]
     assert captured["quest"] == "Find our largest avoidable expense"
     assert captured["data_by_creature"]["pyre"] == {}
+
+
+def test_website_quest_returns_exact_artifact_location(monkeypatch) -> None:
+    async def fake_direct_creatures(names, quest, data_by_creature, sink):
+        return {
+            names[0]: CreatureAlert(
+                headline="Website created",
+                details="The coordinator wrote the requested files.",
+                impact="The founder can open the entrypoint.",
+                recommendation="Review the generated site.",
+            )
+        }
+
+    task = "Create a website about balcony gardening"
+    directory = artifact_directory_for_task(task)
+    monkeypatch.setattr("backend.main.direct_creatures", fake_direct_creatures)
+    monkeypatch.setattr("backend.main.prepare_artifact_directory", lambda value: value)
+    monkeypatch.setattr(
+        "backend.main.list_artifact_files",
+        lambda value: [f"{value}/index.html"] if value else [],
+    )
+
+    response = TestClient(app).post(
+        "/api/quests",
+        json={"quest": task, "target": "pyre"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["artifact_directory"] == directory
+    assert response.json()["artifact_entrypoint"] == f"{directory}/index.html"
+    assert response.json()["artifact_files"] == [f"{directory}/index.html"]
 
 
 def test_spawned_creature_persists_and_restores(monkeypatch, tmp_path) -> None:
@@ -277,7 +328,7 @@ def test_party_quest_routes_peer_reports_to_coordinator(monkeypatch) -> None:
     events: list[dict[str, object]] = []
     synthesis_calls: list[tuple[str, str]] = []
 
-    async def fake_direct_creatures(names, quest, data_by_creature, sink):
+    async def fake_direct_creatures(names, quest, data_by_creature, sink, **kwargs):
         return {
             name: CreatureAlert(
                 headline=f"{name} finding",
@@ -288,7 +339,7 @@ def test_party_quest_routes_peer_reports_to_coordinator(monkeypatch) -> None:
             for name in names
         }
 
-    async def fake_run(name, input_text, sink, phase):
+    async def fake_run(name, input_text, sink, phase, **kwargs):
         synthesis_calls.append((name, phase))
         assert "PEER REPORTS" in input_text
         return CreatureAlert(
@@ -449,7 +500,15 @@ def test_room_pm_delegates_to_supporters_and_owns_final_answer(monkeypatch) -> N
 def test_supporting_run_is_not_published_as_room_answer(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_run(name, input_text, sink, phase, *, publish_alert=True):
+    async def fake_run(
+        name,
+        input_text,
+        sink,
+        phase,
+        *,
+        publish_alert=True,
+        artifact_directory=None,
+    ):
         captured.update(
             name=name,
             input_text=input_text,

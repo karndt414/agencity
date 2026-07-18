@@ -38,6 +38,13 @@ export type CreatureAlert = {
   recommendation: string
   sources: string[]
   phase?: string
+  artifact_directory?: string | null
+}
+
+export type ArtifactLocation = {
+  directory: string
+  entrypoint: string
+  files: string[]
 }
 
 export type TaskReport = {
@@ -54,6 +61,7 @@ export type TaskReport = {
   recommendations: string[]
   risks: string[]
   sources: string[]
+  artifact_directory?: string | null
 }
 
 type ConnectionState = 'connecting' | 'online' | 'offline'
@@ -64,6 +72,9 @@ type ReleaseAllResponse = {
 
 type QuestResponse = {
   results: Record<string, { status: 'found' | 'error'; error?: string }>
+  artifact_directory?: string | null
+  artifact_entrypoint?: string | null
+  artifact_files?: string[]
 }
 
 type CityEvent = {
@@ -87,6 +98,9 @@ type CityEvent = {
   total_tokens?: number
   estimated_cost_usd?: number
   pricing_available?: boolean
+  artifact_directory?: string | null
+  artifact_entrypoint?: string | null
+  artifact_files?: string[]
   error?: string
   alert?: Omit<CreatureAlert, 'id' | 'createdAt' | 'creature'>
   report?: TaskReport
@@ -114,6 +128,7 @@ export function useAgencity() {
   const [states, setStates] = useState<Record<string, CreatureState>>(initialStates)
   const [alerts, setAlerts] = useState<CreatureAlert[]>([])
   const [reports, setReports] = useState<TaskReport[]>([])
+  const [artifactLocation, setArtifactLocation] = useState<ArtifactLocation | null>(null)
   const [thoughts, setThoughts] = useState<Record<string, string>>({})
   const [activities, setActivities] = useState<Record<string, OfficeActivity>>({})
   const [collaboration, setCollaboration] = useState<OfficeCollaboration | null>(null)
@@ -322,6 +337,13 @@ export function useAgencity() {
           setReports((current) => [event.report!, ...current].slice(0, 4))
           setError(null)
         }
+        if (event.type === 'artifacts' && event.artifact_directory && event.artifact_entrypoint) {
+          setArtifactLocation({
+            directory: event.artifact_directory,
+            entrypoint: event.artifact_entrypoint,
+            files: event.artifact_files ?? [],
+          })
+        }
         if (event.type === 'error') {
           if (event.creature) {
             setStates((current) => ({ ...current, [event.creature!]: 'error' }))
@@ -412,6 +434,15 @@ export function useAgencity() {
 
     try {
       const result = await request<QuestResponse>('/api/quests', { quest, target, supporters })
+      if (result.artifact_directory && result.artifact_entrypoint) {
+        setArtifactLocation({
+          directory: result.artifact_directory,
+          entrypoint: result.artifact_entrypoint,
+          files: result.artifact_files ?? [],
+        })
+      } else {
+        setArtifactLocation(null)
+      }
       setStates((current) => ({
         ...current,
         ...Object.fromEntries(selected.map((name) => [
@@ -491,6 +522,7 @@ export function useAgencity() {
 
   return {
     activities,
+    artifactLocation,
     alerts,
     apiKeyConfigured,
     connection,

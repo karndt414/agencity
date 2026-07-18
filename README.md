@@ -157,6 +157,15 @@ safe workspace path. Workers must cite exact URLs for public research or exact
 repository/data references for supplied records; the orchestrator omits uncited
 findings from the final report and records the omission as a risk.
 
+Website tasks have a predictable output location. If a quest mentions a website,
+webpage, HTML, landing page, frontend, or web app, the system assigns
+`artifacts/<task-slug>/` and requires the entrypoint to be
+`artifacts/<task-slug>/index.html`. The task and quest API responses include
+`artifact_directory`, `artifact_entrypoint`, and the generated `artifact_files`
+list; the frontend also displays the exact entrypoint. In multi-agent workflows,
+specialist workers research and plan while the coordinator owns final website
+writes, preventing duplicate files in different folders.
+
 ### How the web layer controls the agents
 
 The user never opens a terminal. Never sees code. The city IS the interface.

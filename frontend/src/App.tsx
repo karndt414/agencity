@@ -105,6 +105,7 @@ function formatInboxTime(createdAt: number): string {
 function App() {
   const {
     activities,
+    artifactLocation,
     alerts,
     apiKeyConfigured,
     connection,
@@ -878,6 +879,15 @@ function App() {
           <div className="configuration-warning pixel-panel" role="alert">ADD <code>OPENAI_API_KEY</code> TO <code>backend/.env</code></div>
         )}
         {error && <div className="runtime-error pixel-panel" role="alert">{error}</div>}
+        {artifactLocation && (
+          <div className="artifact-location pixel-panel" role="status">
+            <span>WEBSITE OUTPUT</span>
+            <code>{artifactLocation.entrypoint}</code>
+            {artifactLocation.files.length > 0 && (
+              <small>{artifactLocation.files.join(' · ')}</small>
+            )}
+          </div>
+        )}
       </div>
 
       {reports.slice(0, 1).map((report) => (

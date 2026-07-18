@@ -2034,6 +2034,31 @@ p { margin: 0; }
   color: #733b36;
 }
 
+.artifact-location {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-color: #6d7f52;
+  background: #e8edc9;
+  color: #52683f;
+  font-size: 0.43rem;
+  font-weight: 900;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.artifact-location code,
+.artifact-location small {
+  color: #745548;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+
+.artifact-location small {
+  font-size: 0.38rem;
+  font-weight: 700;
+}
+
 .inbox-toast {
   position: fixed;
   z-index: 32;

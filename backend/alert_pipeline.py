@@ -14,6 +14,7 @@ class CreatureAlert(BaseModel):
     impact: str
     recommendation: str
     sources: list[str] = Field(default_factory=list)
+    artifact_directory: str | None = None
 
 
 def _decode_json(value: str) -> Any:

@@ -10,6 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .alert_pipeline import CreatureAlert
+from .artifacts import (
+    artifact_directory_for_task,
+    artifact_entrypoint_for_task,
+    list_artifact_files,
+    prepare_artifact_directory,
+)
 from .config import ORCHESTRATOR_MODEL, WORKER_MODEL, has_openai_api_key
 from .creature_manager import (
     DATA_FILES,
@@ -102,6 +108,21 @@ app.add_middleware(
 )
 
 
+def _artifact_payload(task: str) -> dict[str, Any]:
+    directory = artifact_directory_for_task(task)
+    return {
+        "artifact_directory": directory,
+        "artifact_entrypoint": artifact_entrypoint_for_task(task),
+        "artifact_files": list_artifact_files(directory),
+    }
+
+
+async def _publish_artifact_location(task: str) -> None:
+    payload = _artifact_payload(task)
+    if payload["artifact_directory"]:
+        await manager.broadcast({"type": "artifacts", **payload})
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {
@@ -159,6 +180,7 @@ async def task_endpoint(request: TaskRequest) -> dict[str, Any]:
     task = request.task.strip()
     if not task:
         raise HTTPException(status_code=422, detail="Task is required")
+    artifact_directory = prepare_artifact_directory(artifact_directory_for_task(task))
 
     target = normalize_name(request.target)
     if target == "all":
@@ -189,18 +211,24 @@ async def task_endpoint(request: TaskRequest) -> dict[str, Any]:
         "target": target,
         "results": _result_payload(results),
         "report": report.model_dump() if report else None,
+        **_artifact_payload(task),
     }
-    if request.report_path and report is not None:
-        if Path(request.report_path).suffix.lower() != ".md":
+    report_path = request.report_path
+    if report_path is None and report is not None and artifact_directory:
+        report_path = f"{artifact_directory}/REPORT.md"
+    if report_path and report is not None:
+        if Path(report_path).suffix.lower() != ".md":
             raise HTTPException(status_code=400, detail="report_path must end in .md")
         try:
             response["artifact"] = write_workspace_file_impl(
-                request.report_path,
+                report_path,
                 render_task_report(report),
                 overwrite=True,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response.update(_artifact_payload(task))
+    await _publish_artifact_location(task)
     return response
 
 
@@ -271,6 +299,7 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
     quest = request.quest.strip()
     if not quest:
         raise HTTPException(status_code=422, detail="Quest is required")
+    prepare_artifact_directory(artifact_directory_for_task(quest))
 
     target = normalize_name(request.target)
     if target == "all":
@@ -318,11 +347,14 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
             else await direct_creatures(names, quest, data_by_creature, manager.broadcast)
         )
     )
-    return {
+    response = {
         "quest": quest,
         "target": target,
         "results": _result_payload(results),
+        **_artifact_payload(quest),
     }
+    await _publish_artifact_location(quest)
+    return response
 
 
 @app.websocket("/ws")
