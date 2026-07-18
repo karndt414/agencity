@@ -293,7 +293,6 @@ function PixelRoom({
         })}
       </span>
       <span className="room-status"><i />{roomState ? liveStatus[roomState] : room.status}</span>
-      {selected && <span className="selected-corners" aria-hidden="true"><i /><i /><i /><i /></span>}
     </button>
   )
 }
