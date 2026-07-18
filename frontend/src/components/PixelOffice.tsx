@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { getOfficeHeight, type AgentKind, type RoomData, type RoomMember } from '../data/rooms'
+import { SUPPORT_ACTIONS, getOfficeHeight, type AgentKind, type RoomData, type RoomMember } from '../data/rooms'
 import type { CreatureState } from '../hooks/useAgencity'
 
 const gadgetLabel: Record<AgentKind, string> = {
@@ -17,11 +17,39 @@ const liveStatus: Record<CreatureState, string> = {
   error: 'Needs attention',
 }
 
-function PixelCharacter({ member, index }: { member: RoomMember; index: number }) {
+const characterStatus: Record<CreatureState, string> = {
+  idle: 'LIVE',
+  hunting: 'WORKING',
+  found: 'DONE',
+  error: 'ERROR',
+}
+
+function PixelCharacter({
+  member,
+  index,
+  agentState,
+  runtimeAvailable,
+  supporting,
+}: {
+  member: RoomMember
+  index: number
+  agentState?: CreatureState
+  runtimeAvailable: boolean
+  supporting: boolean
+}) {
+  const runtimeLabel = runtimeAvailable
+    ? characterStatus[agentState ?? 'idle']
+    : supporting
+      ? SUPPORT_ACTIONS[member.kind]
+    : member.backendCreature
+      ? 'OFFLINE'
+      : 'ROSTER'
+  const runtimeClass = agentState ?? (supporting ? 'supporting' : runtimeAvailable ? 'idle' : 'local')
+
   return (
     <div
-      className={`pixel-character character-${member.kind} ${member.level === 'pm' ? 'is-pm' : 'is-subagent'} character-slot-${index + 1}`}
-      title={`${member.name} · ${member.role}`}
+      className={`pixel-character character-${member.kind} ${member.level === 'pm' ? 'is-pm' : 'is-subagent'} character-slot-${index + 1} runtime-${runtimeClass}`}
+      title={`${member.name} · ${member.role} · ${runtimeLabel}`}
       aria-hidden="true"
     >
       <span className="character-shadow" />
@@ -39,6 +67,8 @@ function PixelCharacter({ member, index }: { member: RoomMember; index: number }
       </span>
       <span className="character-tool" />
       <span className="character-name">{member.name}<b>{member.level === 'pm' ? 'PM' : 'SUB'}</b></span>
+      <span className={`character-runtime ${runtimeAvailable ? 'is-live' : supporting ? 'is-supporting' : 'is-local'}`}><i />{runtimeLabel}</span>
+      {supporting && <span className="support-pixels"><i /><i /><i /></span>}
     </div>
   )
 }
@@ -51,10 +81,22 @@ function PixelPlant({ className = '' }: { className?: string }) {
   )
 }
 
-function PixelWorkstation({ member, index }: { member?: RoomMember; index: number }) {
+function PixelWorkstation({
+  member,
+  index,
+  agentState,
+  runtimeAvailable,
+  supporting,
+}: {
+  member?: RoomMember
+  index: number
+  agentState?: CreatureState
+  runtimeAvailable: boolean
+  supporting: boolean
+}) {
   return (
     <span
-      className={`room-workstation workstation-slot-${index + 1} ${member ? '' : 'is-vacant'}`}
+      className={`room-workstation workstation-slot-${index + 1} ${member ? '' : 'is-vacant'} ${supporting ? 'is-supporting' : ''}`}
       data-desk-owner={member?.name ?? 'Vacant'}
       aria-hidden="true"
     >
@@ -66,7 +108,15 @@ function PixelWorkstation({ member, index }: { member?: RoomMember; index: numbe
         <small>{member?.name ?? 'VACANT'}</small>
       </span>
       <span className="room-chair"><i /></span>
-      {member && <PixelCharacter member={member} index={index} />}
+      {member && (
+        <PixelCharacter
+          member={member}
+          index={index}
+          agentState={agentState}
+          runtimeAvailable={runtimeAvailable}
+          supporting={supporting}
+        />
+      )}
     </span>
   )
 }
@@ -99,15 +149,30 @@ function PixelRoom({
   room,
   index,
   selected,
-  agentState,
+  agentStates,
+  availableCreatures,
   onSelect,
 }: {
   room: RoomData
   index: number
   selected: boolean
-  agentState?: CreatureState
+  agentStates: Record<string, CreatureState>
+  availableCreatures: Set<string>
   onSelect: () => void
 }) {
+  const runtimeMembers = room.members.filter((member) => (
+    member.backendCreature && availableCreatures.has(member.backendCreature)
+  ))
+  const runtimeStates = runtimeMembers.map((member) => agentStates[member.backendCreature!])
+  const roomState = runtimeStates.includes('hunting')
+    ? 'hunting'
+    : runtimeStates.includes('error')
+      ? 'error'
+      : runtimeStates.includes('found')
+        ? 'found'
+        : runtimeMembers.length > 0
+          ? 'idle'
+          : undefined
   const style = {
     '--room-accent': room.color,
     '--room-soft': room.softColor,
@@ -117,7 +182,7 @@ function PixelRoom({
 
   return (
     <button
-      className={`pixel-room pixel-room-${index + 1} room-${room.kind} state-${agentState ?? 'local'} ${selected ? 'is-selected' : ''}`}
+      className={`pixel-room pixel-room-${index + 1} room-${room.kind} state-${roomState ?? 'local'} ${selected ? 'is-selected' : ''}`}
       style={style}
       onClick={onSelect}
       type="button"
@@ -136,17 +201,34 @@ function PixelRoom({
         <small>{gadgetLabel[room.kind]}</small><i /><i /><i />
       </span>
       <PixelPlant className="room-plant" />
-      <span className="room-team-count" aria-hidden="true">{room.members.length || '0'} CREW</span>
+      <span className="room-team-count" aria-hidden="true">{room.members.length || '0'} CREW · {runtimeMembers.length} LIVE</span>
       <span
         className="room-workstations"
         style={{ '--workstation-count': Math.max(1, room.members.length) } as CSSProperties}
         aria-hidden="true"
       >
-        {(room.members.length ? room.members : [undefined]).map((member, memberIndex) => (
-          <PixelWorkstation key={member?.id ?? 'vacant'} member={member} index={memberIndex} />
-        ))}
+        {(room.members.length ? room.members : [undefined]).map((member, memberIndex) => {
+          const runtimeAvailable = Boolean(
+            member?.backendCreature && availableCreatures.has(member.backendCreature),
+          )
+          const supporting = Boolean(
+            roomState === 'hunting'
+            && member?.level === 'subagent'
+            && !member.backendCreature,
+          )
+          return (
+            <PixelWorkstation
+              key={member?.id ?? 'vacant'}
+              member={member}
+              index={memberIndex}
+              runtimeAvailable={runtimeAvailable}
+              agentState={runtimeAvailable ? agentStates[member!.backendCreature!] : undefined}
+              supporting={supporting}
+            />
+          )
+        })}
       </span>
-      <span className="room-status"><i />{agentState ? liveStatus[agentState] : room.status}</span>
+      <span className="room-status"><i />{roomState ? liveStatus[roomState] : room.status}</span>
       {selected && <span className="selected-corners" aria-hidden="true"><i /><i /><i /><i /></span>}
     </button>
   )
@@ -160,6 +242,7 @@ type PixelOfficeProps = {
   zoom: number
   focusedRoomId?: string | null
   pan?: { x: number; y: number }
+  availableCreatures?: string[]
 }
 
 export default function PixelOffice({
@@ -170,11 +253,13 @@ export default function PixelOffice({
   zoom,
   focusedRoomId = null,
   pan = { x: 0, y: 0 },
+  availableCreatures = [],
 }: PixelOfficeProps) {
   const officeRef = useRef<HTMLElement>(null)
   const [camera, setCamera] = useState({ x: 0, y: 0 })
   const firstFloorBreak = Math.min(3, Math.ceil(rooms.length / 2))
   const officeHeight = getOfficeHeight(rooms.length)
+  const availableCreatureSet = new Set(availableCreatures)
 
   useLayoutEffect(() => {
     const updateCamera = () => {
@@ -226,14 +311,14 @@ export default function PixelOffice({
   } as CSSProperties
 
   const renderRoom = (room: RoomData, index: number) => {
-    const leadCreature = room.members.find((member) => member.level === 'pm')?.backendCreature
     return (
       <PixelRoom
         key={room.id}
         room={room}
         index={index}
         selected={selectedRoomId === room.id}
-        agentState={agentStates[leadCreature ?? room.id]}
+        agentStates={agentStates}
+        availableCreatures={availableCreatureSet}
         onSelect={() => onSelectRoom(room)}
       />
     )

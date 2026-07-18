@@ -1,5 +1,13 @@
 export type AgentKind = 'finance' | 'growth' | 'research' | 'talent' | 'coder'
 
+export const SUPPORT_ACTIONS: Record<AgentKind, string> = {
+  finance: 'AUDITING',
+  growth: 'DRAFTING',
+  research: 'RESEARCHING',
+  talent: 'MATCHING',
+  coder: 'BUILDING',
+}
+
 export type RoomMember = {
   id: string
   name: string

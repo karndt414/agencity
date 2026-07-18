@@ -12,6 +12,7 @@ import PixelOffice from './components/PixelOffice'
 import {
   ROOMS,
   ROOM_PALETTES,
+  SUPPORT_ACTIONS,
   getOfficeHeight,
   type AgentKind,
   type RoomData,
@@ -158,9 +159,12 @@ function App() {
     [rooms, selectedRoomId],
   )
   const selectedLead = selectedRoom.members.find((member) => member.level === 'pm')
-  const selectedCreature = selectedLead?.backendCreature ?? (
+  const selectedLeadCreature = selectedLead?.backendCreature
+  const selectedCreature = selectedLeadCreature && creatures.includes(selectedLeadCreature)
+    ? selectedLeadCreature
+    : (
     creatures.includes(selectedRoom.id) ? selectedRoom.id : undefined
-  )
+    )
   const selectedState = selectedCreature ? states[selectedCreature] ?? 'idle' : undefined
   const selectedProgress = selectedState === 'hunting'
     ? 38
@@ -175,6 +179,13 @@ function App() {
   const selectedQuest = lastQuest && selectedCreature && (
     lastQuest.target === 'all' || lastQuest.target === selectedCreature
   ) ? lastQuest.text : selectedRoom.task
+  const selectedWorkingMember = selectedRoom.members.find((member) => (
+    member.backendCreature && creatures.includes(member.backendCreature) && states[member.backendCreature] === 'hunting'
+  ))
+  const selectedRoomIsWorking = Boolean(selectedWorkingMember)
+  const selectedSupportingMembers = selectedRoomIsWorking
+    ? selectedRoom.members.filter((member) => member.level === 'subagent' && !member.backendCreature)
+    : []
 
   const roomStyle = {
     '--room-color': selectedRoom.color,
@@ -302,6 +313,12 @@ function App() {
     setSpawnRoomId(roomId)
     setShowSpawn(true)
     setSpawnError(null)
+  }
+
+  const openQuestForCreature = (creature: string) => {
+    setQuestTarget(creature)
+    setQuestError(null)
+    setShowQuest(true)
   }
 
   const fitOffice = () => {
@@ -441,6 +458,7 @@ function App() {
           zoom={zoom}
           focusedRoomId={focusedRoomId}
           pan={pan}
+          availableCreatures={creatures}
         />
       </div>
 
@@ -510,8 +528,14 @@ function App() {
           <span>{selectedProgress}% COMPLETE <em>{selectedState === 'hunting' ? 'LIVE' : '~8 MIN'}</em></span>
         </div>
         <div className="room-log">
-          <div><span>✓</span><p><strong>CONTEXT LOADED</strong><small>Workspace ready</small></p></div>
-          <div><span>↗</span><p><strong>AGENT THOUGHT</strong><small>{thoughts[selectedRoom.id] || 'Waiting for next run'}</small></p></div>
+          <div className={selectedSupportingMembers.length > 0 ? 'is-supporting' : ''}>
+            <span>{selectedSupportingMembers.length > 0 ? '↯' : '✓'}</span>
+            <p>
+              <strong>{selectedSupportingMembers.length > 0 ? `${selectedSupportingMembers.length} SUBAGENTS SUPPORTING` : 'TEAM READY'}</strong>
+              <small>{selectedSupportingMembers.length > 0 ? selectedSupportingMembers.map((member) => SUPPORT_ACTIONS[member.kind]).join(' · ') : 'Workspace ready'}</small>
+            </p>
+          </div>
+          <div><span>↗</span><p><strong>{selectedWorkingMember ? `${selectedWorkingMember.name.toUpperCase()} IS WORKING` : 'AGENT THOUGHT'}</strong><small>{thoughts[selectedWorkingMember?.backendCreature ?? selectedCreature ?? selectedRoom.id] || 'Waiting for next run'}</small></p></div>
           <div className={`is-live state-${selectedState ?? 'local'}`}>
             <span>{selectedState === 'hunting' ? '…' : '●'}</span>
             <p><strong>{selectedState ? stateLabels[selectedState] : selectedRoom.status}</strong><small>{connection === 'online' ? 'Agent network connected' : 'Backend reconnecting'}</small></p>
@@ -521,13 +545,44 @@ function App() {
           <div className="roster-title"><span>ROOM TEAM</span><b>{selectedRoom.members.length}</b></div>
           {selectedRoom.members.length === 0 ? (
             <button className="empty-roster" type="button" onClick={() => openRecruiter(selectedRoom.id)}>+ STAFF THIS ROOM</button>
-          ) : selectedRoom.members.map((member) => (
-            <div className="roster-member" key={member.id}>
-              <i>{kindIcons[member.kind]}</i>
-              <span><strong>{member.name}</strong><small>{member.role}</small></span>
-              <b>{member.level === 'pm' ? 'PM' : 'SUB'}</b>
-            </div>
-          ))}
+          ) : selectedRoom.members.map((member) => {
+            const runtimeAvailable = Boolean(
+              member.backendCreature && creatures.includes(member.backendCreature),
+            )
+            const memberState = runtimeAvailable ? states[member.backendCreature!] ?? 'idle' : undefined
+            const supporting = Boolean(
+              selectedRoomIsWorking
+              && member.level === 'subagent'
+              && !member.backendCreature,
+            )
+            const runtimeLabel = runtimeAvailable
+              ? memberState === 'hunting'
+                ? 'WORKING'
+                : memberState === 'found'
+                  ? 'DONE'
+                  : memberState === 'error'
+                    ? 'ERROR'
+                    : 'LIVE'
+              : supporting
+                ? SUPPORT_ACTIONS[member.kind]
+                : member.backendCreature
+                ? 'OFFLINE'
+                : 'ROSTER ONLY'
+
+            return (
+              <div className={`roster-member state-${memberState ?? (supporting ? 'supporting' : 'local')}`} key={member.id}>
+                <i>{kindIcons[member.kind]}</i>
+                <span><strong>{member.name}</strong><small>{member.role}</small></span>
+                <div className="roster-runtime">
+                  <em><i />{runtimeLabel}</em>
+                  <b>{member.level === 'pm' ? 'PM' : 'SUB'}</b>
+                </div>
+                {runtimeAvailable && member.backendCreature && (
+                  <button type="button" onClick={() => openQuestForCreature(member.backendCreature!)}>ASSIGN</button>
+                )}
+              </div>
+            )
+          })}
           {selectedRoom.members.length > 0 && (
             <button className="roster-add" type="button" onClick={() => openRecruiter(selectedRoom.id)}>+ ADD SUB-AGENT</button>
           )}

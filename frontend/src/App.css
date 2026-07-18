@@ -636,6 +636,86 @@ button {
   font-size: 0.26rem;
 }
 
+.character-runtime {
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  transform: translateX(-50%);
+  border: 2px solid #5b4036;
+  background: #ead2a3;
+  color: #654a3e;
+  font-size: 0.25rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.character-runtime i {
+  width: 4px;
+  height: 4px;
+  background: #8b7566;
+}
+
+.character-runtime.is-live i { background: #579362; }
+.character-runtime.is-supporting {
+  border-color: #8f5f32;
+  background: #f4cf75;
+  color: #714421;
+}
+.character-runtime.is-supporting i { background: #cc6f3d; animation: hunting-blink 0.55s steps(2) infinite; }
+.pixel-character.runtime-hunting .character-runtime { background: #f4cf75; }
+.pixel-character.runtime-hunting .character-runtime i { background: #cc6f3d; animation: hunting-blink 0.55s steps(2) infinite; }
+.pixel-character.runtime-found .character-runtime i { background: #398c53; }
+.pixel-character.runtime-error .character-runtime i { background: #b74f45; }
+
+.pixel-character.runtime-hunting {
+  animation-duration: 0.45s;
+  filter: drop-shadow(0 0 7px rgba(238, 174, 66, 0.85));
+}
+
+.pixel-character.runtime-supporting {
+  animation: subagent-work 0.52s steps(2, jump-none) infinite;
+  filter: drop-shadow(0 0 6px rgba(238, 174, 66, 0.72));
+}
+
+.support-pixels {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  right: -14px;
+  display: flex;
+  gap: 2px;
+}
+
+.support-pixels i {
+  width: 4px;
+  height: 4px;
+  background: #e6a746;
+  animation: support-signal 0.75s steps(2) infinite;
+}
+
+.support-pixels i:nth-child(2) { animation-delay: -0.25s; }
+.support-pixels i:nth-child(3) { animation-delay: -0.5s; }
+
+.room-workstation:has(.pixel-character.runtime-hunting) .desk-screen {
+  box-shadow: 0 0 8px #f2b84b;
+}
+
+.room-workstation.is-supporting .desk-screen {
+  background: #e8bd59;
+  box-shadow: inset 0 0 0 3px #ffe9a5, 0 0 9px #e9a844;
+}
+
+.room-workstation.is-supporting .desk-screen b {
+  animation: screen-work 0.8s steps(3) infinite;
+}
+
+.room-workstation.is-supporting .desk-screen b:nth-child(2) { animation-delay: -0.25s; }
+.room-workstation.is-supporting .desk-screen b:nth-child(3) { animation-delay: -0.5s; }
+
 .room-team-count {
   position: absolute;
   z-index: 7;
@@ -1427,6 +1507,11 @@ p { margin: 0; }
 .room-log p strong { font-size: 0.46rem; }
 .room-log p small { margin-top: 2px; color: #8b6a57; font-size: 0.38rem; }
 .room-log .is-live > span { color: var(--room-color); }
+.room-log .is-supporting > span {
+  background: #f1cb73;
+  color: #8a532e;
+  animation: hunting-blink 0.7s steps(2) infinite;
+}
 
 .room-roster {
   display: grid;
@@ -1477,7 +1562,36 @@ p { margin: 0; }
 .roster-member small { min-width: 0; display: block; }
 .roster-member strong { overflow: hidden; font-size: 0.43rem; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .roster-member small { margin-top: 2px; overflow: hidden; color: #896957; font-size: 0.34rem; text-overflow: ellipsis; white-space: nowrap; }
-.roster-member > b { padding: 3px; background: var(--room-color); color: #fff2ce; font-size: 0.3rem; }
+.roster-runtime { display: grid; justify-items: end; gap: 3px; }
+.roster-runtime > b { padding: 3px; background: var(--room-color); color: #fff2ce; font-size: 0.3rem; }
+.roster-runtime em { display: flex; align-items: center; gap: 3px; color: #806151; font-size: 0.27rem; font-style: normal; font-weight: 950; white-space: nowrap; }
+.roster-runtime em i { width: 5px; height: 5px; background: #8b7566; }
+.roster-member.state-idle .roster-runtime em i,
+.roster-member.state-found .roster-runtime em i { background: #579362; }
+.roster-member.state-hunting .roster-runtime em i { background: #df8b3f; animation: hunting-blink 0.55s steps(2) infinite; }
+.roster-member.state-error .roster-runtime em i { background: #b74f45; }
+.roster-member.state-supporting {
+  background: #f1d89a;
+  box-shadow: inset 3px 0 #df8b3f;
+}
+.roster-member.state-supporting .roster-runtime em { color: #8a532e; }
+.roster-member.state-supporting .roster-runtime em i { background: #df8b3f; animation: hunting-blink 0.55s steps(2) infinite; }
+
+.roster-member > button {
+  grid-column: 2 / -1;
+  padding: 4px 6px;
+  border: 2px solid #8b684f;
+  background: #f0d79f;
+  color: #694b3e;
+  font-size: 0.31rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.roster-member.state-hunting {
+  background: #f1d89a;
+  box-shadow: inset 3px 0 #df8b3f;
+}
 
 .roster-add,
 .empty-roster {
@@ -1916,6 +2030,22 @@ p { margin: 0; }
   50% { transform: translateY(-3px); }
 }
 
+@keyframes subagent-work {
+  0%, 100% { transform: translate(-1px, 0); }
+  50% { transform: translate(2px, -3px); }
+}
+
+@keyframes support-signal {
+  0%, 32% { opacity: 0.25; transform: translateY(2px); }
+  33%, 100% { opacity: 1; transform: translateY(-2px); }
+}
+
+@keyframes screen-work {
+  0% { width: 8px; opacity: 0.45; }
+  50% { width: 25px; opacity: 1; }
+  100% { width: 14px; opacity: 0.7; }
+}
+
 @keyframes online-blink {
   0%, 68% { opacity: 1; }
   69%, 100% { opacity: 0.38; }
@@ -1998,5 +2128,9 @@ p { margin: 0; }
   .pixel-room,
   .agent-online,
   .room-status i,
+  .character-runtime i,
+  .roster-runtime em i,
+  .support-pixels i,
+  .room-workstation.is-supporting .desk-screen b,
   .alert-card { animation: none; }
 }
