@@ -276,7 +276,8 @@ export function useAgencity() {
   const spawn = useCallback(async (
     name: string,
     instructions: string,
-    data: Record<string, unknown>,
+    data: Record<string, unknown> = {},
+    runImmediately = false,
   ) => {
     setError(null)
     const result = await request<{ creature: string }>('/api/creatures/spawn', {
@@ -284,7 +285,9 @@ export function useAgencity() {
       instructions,
     })
     setCreatures((current) => [...new Set([...current, result.creature])])
-    await hunt(result.creature, data)
+    setStates((current) => ({ ...current, [result.creature]: 'idle' }))
+    if (runImmediately) await hunt(result.creature, data)
+    return result.creature
   }, [hunt, request])
 
   const dismissAlert = useCallback((id: string) => {
