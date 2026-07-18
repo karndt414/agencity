@@ -104,6 +104,7 @@ function App() {
     creatures,
     dismissAlert,
     error,
+    ensureCreature,
     giveQuest,
     hunt,
     refine,
@@ -120,6 +121,7 @@ function App() {
   const [isPanning, setIsPanning] = useState(false)
   const viewportRef = useRef<HTMLDivElement>(null)
   const commandInputRef = useRef<HTMLInputElement>(null)
+  const restoringCreaturesRef = useRef(new Set<string>())
   const panRef = useRef<{ pointerId: number; x: number; y: number; cameraX: number; cameraY: number; moved: boolean } | null>(null)
   const suppressRoomClickRef = useRef(false)
   const [showAddRoom, setShowAddRoom] = useState(false)
@@ -176,7 +178,9 @@ function App() {
     selectedCreature && connection === 'online' && apiKeyConfigured && selectedState !== 'hunting',
   )
   const selectedQuest = lastQuest && (
-    lastQuest.target === 'all' || lastQuest.target === selectedRoom.id
+    lastQuest.target === 'all'
+    || lastQuest.target === selectedRoom.id
+    || selectedRoom.members.some((member) => `agent:${member.backendCreature}` === lastQuest.target)
   ) ? lastQuest.text : selectedRoom.task
   const selectedWorkingMember = selectedRoom.members.find((member) => (
     member.backendCreature && creatures.includes(member.backendCreature) && states[member.backendCreature] === 'hunting'
@@ -293,6 +297,39 @@ function App() {
   }, [rooms])
 
   useEffect(() => {
+    if (connection !== 'online') return
+
+    const missingAgents = new Map<string, RoomMember>()
+    rooms.forEach((room) => room.members.forEach((member) => {
+      if (
+        member.backendCreature
+        && !creatures.includes(member.backendCreature)
+        && !restoringCreaturesRef.current.has(member.backendCreature)
+      ) {
+        missingAgents.set(member.backendCreature, member)
+      }
+    }))
+
+    missingAgents.forEach((member, expectedCreature) => {
+      restoringCreaturesRef.current.add(expectedCreature)
+      void ensureCreature(member.name, member.instructions ?? member.role)
+        .then((restoredCreature) => {
+          if (restoredCreature === expectedCreature) return
+          setRooms((current) => current.map((room) => ({
+            ...room,
+            members: room.members.map((candidate) => (
+              candidate.backendCreature === expectedCreature
+                ? { ...candidate, backendCreature: restoredCreature }
+                : candidate
+            )),
+          })))
+        })
+        .catch(() => undefined)
+        .finally(() => restoringCreaturesRef.current.delete(expectedCreature))
+    })
+  }, [connection, creatures, ensureCreature, rooms])
+
+  useEffect(() => {
     const openQuestComposer = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
@@ -326,11 +363,37 @@ function App() {
     setQuestError(null)
     setLastQuest({ text: cleanQuest, target: questTarget })
     try {
-      const targetRoom = rooms.find((room) => room.id === questTarget)
-      const targetLead = targetRoom?.members.find((member) => member.level === 'pm')
-      const backendTarget = questTarget === 'all'
-        ? 'all'
-        : targetLead?.backendCreature ?? (creatures.includes(questTarget) ? questTarget : null)
+      let backendTarget: string | null = null
+      if (questTarget === 'all') {
+        backendTarget = 'all'
+      } else if (questTarget.startsWith('agent:')) {
+        const requestedCreature = questTarget.slice('agent:'.length)
+        const targetMember = rooms
+          .flatMap((room) => room.members)
+          .find((member) => member.backendCreature === requestedCreature)
+        if (!targetMember?.backendCreature) {
+          throw new Error('That room agent is no longer assigned. Choose another target.')
+        }
+        backendTarget = creatures.includes(targetMember.backendCreature)
+          ? targetMember.backendCreature
+          : await ensureCreature(
+            targetMember.name,
+            targetMember.instructions ?? targetMember.role,
+          )
+      } else {
+        const targetRoom = rooms.find((room) => room.id === questTarget)
+        const targetLead = targetRoom?.members.find((member) => member.level === 'pm')
+        if (targetLead?.backendCreature) {
+          backendTarget = creatures.includes(targetLead.backendCreature)
+            ? targetLead.backendCreature
+            : await ensureCreature(
+              targetLead.name,
+              targetLead.instructions ?? targetLead.role,
+            )
+        } else if (creatures.includes(questTarget)) {
+          backendTarget = questTarget
+        }
+      }
       if (!backendTarget) throw new Error('This department needs a PM connected to the backend before it can receive quests.')
       await giveQuest(cleanQuest, backendTarget)
       setQuestText('')
@@ -353,6 +416,7 @@ function App() {
         kind: spawnKind,
         level: spawnLevel,
         backendCreature: creature,
+        instructions: spawnInstructions.trim(),
       }
       setRooms((current) => current.map((room) => {
         if (room.id !== spawnRoomId) return room
@@ -611,7 +675,7 @@ function App() {
                 <div className="roster-actions">
                   {runtimeAvailable && member.backendCreature && (
                     <button type="button" onClick={() => {
-                      setQuestTarget(selectedRoom.id)
+                      setQuestTarget(`agent:${member.backendCreature}`)
                       commandInputRef.current?.focus()
                     }}>ASSIGN</button>
                   )}
@@ -831,19 +895,33 @@ function App() {
 
       <form className="command-hud pixel-panel" onSubmit={(event) => void submitQuest(event)}>
         <div className="founder-avatar">S</div>
-        <select className="command-department" aria-label="Quest department" value={questTarget} onChange={(event) => {
-          setQuestTarget(event.target.value)
-          const room = rooms.find((candidate) => candidate.id === event.target.value)
+        <select className="command-department" aria-label="Quest target" value={questTarget} onChange={(event) => {
+          const target = event.target.value
+          const creatureTarget = target.startsWith('agent:') ? target.slice('agent:'.length) : null
+          const room = rooms.find((candidate) => (
+            candidate.id === target
+            || candidate.members.some((member) => member.backendCreature === creatureTarget)
+          ))
           if (room) handleFocusRoom(room)
+          setQuestTarget(target)
         }}>
           <option value="all">ALL DEPTS</option>
-          {rooms.map((room) => <option key={room.id} value={room.id}>{room.room.toUpperCase()}</option>)}
+          {rooms.map((room) => (
+            <optgroup key={room.id} label={room.room.toUpperCase()}>
+              <option value={room.id}>ROOM PM · {room.agent.toUpperCase()}</option>
+              {room.members.filter((member) => member.backendCreature).map((member) => (
+                <option key={member.id} value={`agent:${member.backendCreature}`}>
+                  {member.level === 'pm' ? 'PM' : 'SUB'} · {member.name.toUpperCase()}
+                </option>
+              ))}
+            </optgroup>
+          ))}
         </select>
         <input
           ref={commandInputRef}
           className="command-input"
           aria-label="Give agents a quest"
-          placeholder="Give this department a quest…"
+          placeholder="Give this room or agent a quest…"
           value={questText}
           onChange={(event) => setQuestText(event.target.value)}
         />

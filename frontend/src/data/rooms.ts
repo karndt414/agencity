@@ -15,6 +15,7 @@ export type RoomMember = {
   kind: AgentKind
   level: 'pm' | 'subagent'
   backendCreature?: string
+  instructions?: string
 }
 
 export type RoomData = {

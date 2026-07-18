@@ -435,6 +435,25 @@ export function useAgencity() {
     return result.creature
   }, [hunt, request])
 
+  const ensureCreature = useCallback(async (name: string, instructions: string) => {
+    try {
+      const result = await request<{ creature: string }>('/api/creatures/ensure', {
+        name,
+        instructions,
+      })
+      setCreatures((current) => [...new Set([...current, result.creature])])
+      setStates((current) => ({
+        ...current,
+        [result.creature]: current[result.creature] ?? 'idle',
+      }))
+      return result.creature
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : `Could not restore ${name}`
+      setError(message)
+      throw cause
+    }
+  }, [request])
+
   const dismissAlert = useCallback((id: string) => {
     setAlerts((current) => current.filter((alert) => alert.id !== id))
   }, [])
@@ -448,6 +467,7 @@ export function useAgencity() {
     creatures,
     dismissAlert,
     error,
+    ensureCreature,
     giveQuest,
     hunt,
     refine,

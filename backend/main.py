@@ -18,7 +18,9 @@ from .creature_manager import (
     hunt_creature as run_hunt,
 )
 from .creatures import CREATURES, get_creature, normalize_name
-from .spawn import spawn_creature
+from .spawn import ensure_spawned_creature, restore_spawned_creatures, spawn_creature
+
+restore_spawned_creatures()
 
 
 class ConnectionManager:
@@ -132,12 +134,34 @@ async def refine_endpoint(name: str, request: RefineRequest) -> dict[str, Any]:
 
 @app.post("/api/creatures/spawn")
 async def spawn_endpoint(request: SpawnRequest) -> dict[str, str]:
-    creature = spawn_creature(request.name, request.instructions, request.model)
+    try:
+        creature = spawn_creature(request.name, request.instructions, request.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     key = normalize_name(request.name)
     await manager.broadcast(
         {"type": "spawned", "creature": key, "name": creature.name}
     )
     return {"creature": key, "name": creature.name}
+
+
+@app.post("/api/creatures/ensure")
+async def ensure_creature_endpoint(request: SpawnRequest) -> dict[str, str]:
+    creature, created = ensure_spawned_creature(
+        request.name,
+        request.instructions,
+        request.model,
+    )
+    key = normalize_name(request.name)
+    if created:
+        await manager.broadcast(
+            {"type": "spawned", "creature": key, "name": creature.name}
+        )
+    return {
+        "creature": key,
+        "name": creature.name,
+        "status": "restored" if created else "existing",
+    }
 
 
 @app.post("/api/quests")

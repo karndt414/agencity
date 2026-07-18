@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from agents import WebSearchTool
 
 import backend.creature_manager as creature_manager
+import backend.spawn as spawn_module
 from backend.alert_pipeline import CreatureAlert, parse_alert
 from backend.creatures import CREATURES
 from backend.creature_manager import _internal_context, _usage_message, select_quest_coordinator
@@ -83,6 +85,74 @@ def test_quest_dispatches_to_existing_creature(monkeypatch) -> None:
     assert captured["names"] == ["pyre"]
     assert captured["quest"] == "Find our largest avoidable expense"
     assert captured["data_by_creature"]["pyre"] == {}
+
+
+def test_spawned_creature_persists_and_restores(monkeypatch, tmp_path) -> None:
+    registry_file = tmp_path / "spawned_creatures.json"
+    monkeypatch.setattr(spawn_module, "SPAWN_REGISTRY_FILE", registry_file)
+    key = "persistent-researcher"
+    CREATURES.pop(key, None)
+
+    try:
+        spawn_module.spawn_creature(
+            "Persistent Researcher",
+            "Research current public information and cite the sources.",
+        )
+
+        definitions = json.loads(registry_file.read_text(encoding="utf-8"))
+        assert definitions[0]["key"] == key
+        assert key in CREATURES
+
+        # Simulate the in-memory registry being cleared by a backend restart.
+        CREATURES.pop(key)
+        assert spawn_module.restore_spawned_creatures() == [key]
+        assert key in CREATURES
+        assert CREATURES[key].model_settings.tool_choice == "web_search"
+    finally:
+        CREATURES.pop(key, None)
+
+
+def test_ensure_repairs_stale_room_agent_before_quest(monkeypatch, tmp_path) -> None:
+    registry_file = tmp_path / "spawned_creatures.json"
+    monkeypatch.setattr(spawn_module, "SPAWN_REGISTRY_FILE", registry_file)
+    key = "restored-room-agent"
+    CREATURES.pop(key, None)
+    captured: dict[str, object] = {}
+
+    async def fake_direct_creatures(names, quest, data_by_creature, sink):
+        captured["names"] = names
+        return {
+            names[0]: CreatureAlert(
+                headline="Quest complete",
+                details="The restored room agent completed its assignment.",
+                impact="Room is operational",
+                recommendation="Continue",
+            )
+        }
+
+    monkeypatch.setattr("backend.main.direct_creatures", fake_direct_creatures)
+    client = TestClient(app)
+
+    try:
+        ensured = client.post(
+            "/api/creatures/ensure",
+            json={
+                "name": "Restored Room Agent",
+                "instructions": "Research the assigned topic on the public web.",
+            },
+        )
+        quest = client.post(
+            "/api/quests",
+            json={"quest": "Investigate the market", "target": key},
+        )
+
+        assert ensured.status_code == 200
+        assert ensured.json()["status"] == "restored"
+        assert quest.status_code == 200
+        assert captured["names"] == [key]
+        assert registry_file.exists()
+    finally:
+        CREATURES.pop(key, None)
 
 
 def test_quest_preserves_explicit_internal_context_without_loading_fixtures(monkeypatch) -> None:
