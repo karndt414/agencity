@@ -401,7 +401,6 @@ function App() {
   }
 
   const closeRefineComposer = () => {
-    if (refinePending) return
     setRefineTarget(null)
     setRefinePrompt('')
     setRefineError(null)
@@ -683,7 +682,7 @@ function App() {
           >
             <header>
               <span>FOLLOW-UP · {refineTarget.creature.toUpperCase()}</span>
-              <button type="button" aria-label="Close follow-up prompt" disabled={refinePending} onClick={closeRefineComposer}>×</button>
+              <button type="button" aria-label="Close follow-up prompt" onClick={closeRefineComposer}>×</button>
             </header>
             <h2 id="refine-title">DIG DEEPER</h2>
             <div className="refine-context">
@@ -703,7 +702,7 @@ function App() {
               <p className="quest-help">The agent keeps its existing session context and will return a new alert based on your follow-up.</p>
               {refineError && <p className="form-error" role="alert">{refineError}</p>}
               <div className="modal-actions">
-                <button type="button" disabled={refinePending} onClick={closeRefineComposer}>CANCEL</button>
+                <button type="button" onClick={closeRefineComposer}>{refinePending ? 'CLOSE & KEEP WORKING' : 'CANCEL'}</button>
                 <button
                   type="submit"
                   disabled={refinePending || !refinePrompt.trim() || connection !== 'online' || !apiKeyConfigured}
