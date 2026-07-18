@@ -45,30 +45,6 @@ button {
   pointer-events: none;
 }
 
-.world-pixels {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.world-pixels i {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  background: #d5cb86;
-  box-shadow: 8px 0 #b4b66f, 0 8px #a7b272, 8px 8px #d8d28f;
-  opacity: 0.62;
-}
-
-.world-pixels i:nth-child(1) { top: 18%; left: 8%; }
-.world-pixels i:nth-child(2) { top: 68%; left: 5%; transform: rotate(90deg); }
-.world-pixels i:nth-child(3) { top: 31%; right: 7%; }
-.world-pixels i:nth-child(4) { top: 78%; right: 11%; transform: rotate(90deg); }
-.world-pixels i:nth-child(5) { top: 8%; left: 28%; }
-.world-pixels i:nth-child(6) { bottom: 8%; left: 70%; }
-
 .pixel-panel {
   border: 3px solid var(--panel-border);
   background: var(--paper);

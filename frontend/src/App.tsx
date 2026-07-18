@@ -467,7 +467,6 @@ function App() {
 
   return (
     <main className="game-shell" style={roomStyle}>
-      <div className="world-pixels" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
       <div
         ref={viewportRef}
         className={`office-viewport ${isPanning ? 'is-panning' : ''}`}
