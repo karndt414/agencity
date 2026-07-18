@@ -16,6 +16,7 @@ button {
 }
 
 .game-shell {
+  --command-hud-width: min(760px, calc(100vw - 420px));
   --room-color: #826e9f;
   --room-soft: #cbbbe0;
   --room-progress: 82%;
@@ -1474,7 +1475,7 @@ p { margin: 0; }
   position: absolute;
   z-index: 23;
   bottom: 78px;
-  left: 220px;
+  left: calc((100vw - var(--command-hud-width)) / 2);
   display: flex;
   padding: 4px;
   align-items: center;
@@ -1792,7 +1793,7 @@ p { margin: 0; }
   right: 0;
   bottom: 14px;
   left: 0;
-  width: min(760px, calc(100vw - 420px));
+  width: var(--command-hud-width);
   gap: 8px;
   margin: auto;
   padding: 7px;
@@ -2340,6 +2341,7 @@ p { margin: 0; }
   .room-log,
   .mission-role { display: none; }
   .command-hud { right: 8px; bottom: 8px; left: 8px; width: auto; }
+  .zoom-hud { left: 8px; }
   .office-plan { grid-template-rows: none; }
   .office-roof-sign { width: 170px; }
   .room-shelf { transform: scale(0.75); transform-origin: top left; }
