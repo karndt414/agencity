@@ -63,6 +63,22 @@ def load_data(name: str) -> dict[str, Any]:
     return json.loads((DATA_DIR / filename).read_text(encoding="utf-8"))
 
 
+def _internal_context(data: dict[str, Any]) -> str:
+    if not data:
+        return (
+            "INTERNAL CONTEXT\n"
+            "None supplied. Do not infer private company facts. Use live public web "
+            "research and identify any private fields needed for a complete answer."
+        )
+    return (
+        "OPTIONAL USER-SUPPLIED INTERNAL CONTEXT — UNVERIFIED\n"
+        "Treat this only as supplemental private context. Label any claim derived from "
+        "it as user-supplied, do not search for its private identifiers or values, and "
+        "do not use it as a substitute for current public web evidence.\n"
+        f"{json.dumps(data, ensure_ascii=False, indent=2)}"
+    )
+
+
 def _lock_for(name: str) -> asyncio.Lock:
     key = normalize_name(name)
     if key not in _locks:
@@ -182,7 +198,12 @@ async def hunt_creature(
 ) -> CreatureAlert:
     return await _run(
         name,
-        json.dumps(data, ensure_ascii=False, indent=2),
+        (
+            "AUTONOMOUS WEB-FIRST HUNT\n"
+            "Search the live public web for the strongest current signal in your "
+            "specialty. Cite exact URLs and distinguish fact from inference.\n\n"
+            f"{_internal_context(data)}"
+        ),
         sink,
         phase="hunt",
     )
@@ -195,7 +216,18 @@ async def refine_hunt(
 ) -> CreatureAlert:
     if not follow_up.strip():
         raise ValueError("Follow-up prompt is required")
-    return await _run(name, follow_up.strip(), sink, phase="refine")
+    return await _run(
+        name,
+        (
+            "WEB-FIRST FOLLOW-UP\n"
+            f"{follow_up.strip()}\n\n"
+            "Search the live public web before answering. Treat any internal claims in "
+            "session memory as unverified unless the founder explicitly supplied them, "
+            "and preserve exact supporting URLs in `sources`."
+        ),
+        sink,
+        phase="refine",
+    )
 
 
 async def direct_creature(
@@ -211,11 +243,12 @@ async def direct_creature(
         raise ValueError("Quest is required")
 
     input_text = (
-        "NEW QUEST FROM THE FOUNDER\n"
+        "NEW WEB-FIRST QUEST FROM THE FOUNDER\n"
         f"{clean_quest}\n\n"
-        "Complete this quest using your specialty and the available data below. "
-        "Return the most actionable structured alert you can support.\n\n"
-        f"AVAILABLE DATA\n{json.dumps(data, ensure_ascii=False, indent=2)}"
+        "Search the live public web first. Complete this quest using your specialty, "
+        "cite exact URLs, and return the most actionable structured alert supported by "
+        "current public evidence.\n\n"
+        f"{_internal_context(data)}"
     )
     return await _run(name, input_text, sink, phase="quest")
 
@@ -303,8 +336,10 @@ async def collaborate_on_quest(
         f"Founder quest: {quest.strip()}\n\n"
         "Your fellow creatures completed independent specialist investigations. "
         "Compare their evidence, resolve conflicts, connect findings across specialties, "
-        "and return one prioritized party recommendation. Preserve supporting URLs in "
-        "the `sources` field. You may use your tools or a handoff if a material gap remains.\n\n"
+        "and return one prioritized party recommendation. Search the live web to verify "
+        "the most important claims before synthesizing. Preserve exact supporting URLs "
+        "in the `sources` field. Treat peer claims without public URLs as unverified. "
+        "You may use a handoff if a material gap remains.\n\n"
         f"PEER REPORTS\n{json.dumps(peer_reports, ensure_ascii=False, indent=2)}"
     )
     try:

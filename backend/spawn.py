@@ -9,6 +9,7 @@ from .creatures import (
     build_agent_tools,
     register_creature,
     normalize_name,
+    web_first_model_settings,
 )
 
 
@@ -28,6 +29,7 @@ def spawn_creature(name: str, instructions: str, model: str | None = None) -> Ag
         model=model or MODEL,
         output_type=CreatureAlert,
         tools=build_agent_tools(),
+        model_settings=web_first_model_settings(),
     )
     register_creature(normalize_name(clean_name), creature)
     return creature
