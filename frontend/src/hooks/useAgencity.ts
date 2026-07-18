@@ -300,16 +300,22 @@ export function useAgencity() {
     }
   }, [creatures, request])
 
-  const refine = useCallback(async (creature: string) => {
+  const refine = useCallback(async (creature: string, followUp: string) => {
+    const cleanFollowUp = followUp.trim()
+    if (!cleanFollowUp) throw new Error('A follow-up prompt is required')
+
+    setError(null)
     setStates((current) => ({ ...current, [creature]: 'hunting' }))
+    setThoughts((current) => ({ ...current, [creature]: '' }))
     try {
       await request(`/api/creatures/${encodeURIComponent(creature)}/refine`, {
-        follow_up: 'Identify the single highest-impact next action and explain why.',
+        follow_up: cleanFollowUp,
       })
       setStates((current) => ({ ...current, [creature]: 'found' }))
     } catch (cause) {
       setStates((current) => ({ ...current, [creature]: 'error' }))
       setError(cause instanceof Error ? cause.message : 'Refine failed')
+      throw cause
     }
   }, [request])
 

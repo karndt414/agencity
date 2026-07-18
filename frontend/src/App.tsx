@@ -19,7 +19,7 @@ import {
   type RoomData,
   type RoomMember,
 } from './data/rooms'
-import { CORE_CREATURES, useAgencity, type CreatureState } from './hooks/useAgencity'
+import { CORE_CREATURES, useAgencity, type CreatureAlert, type CreatureState } from './hooks/useAgencity'
 import agencityGreenLogo from '../../assets/agencitygreen.png'
 import './App.css'
 
@@ -135,6 +135,10 @@ function App() {
   )
   const [spawnData, setSpawnData] = useState('{"meetings": []}')
   const [spawnError, setSpawnError] = useState<string | null>(null)
+  const [refineTarget, setRefineTarget] = useState<CreatureAlert | null>(null)
+  const [refinePrompt, setRefinePrompt] = useState('')
+  const [refineError, setRefineError] = useState<string | null>(null)
+  const [refinePending, setRefinePending] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{
     kind: 'room' | 'member'
     roomId: string
@@ -389,6 +393,42 @@ function App() {
     window.requestAnimationFrame(() => handleFocusRoom(room))
   }
 
+  const openRefineComposer = (alert: CreatureAlert) => {
+    setRefineTarget(alert)
+    setRefinePrompt('')
+    setRefineError(null)
+  }
+
+  const closeRefineComposer = () => {
+    if (refinePending) return
+    setRefineTarget(null)
+    setRefinePrompt('')
+    setRefineError(null)
+  }
+
+  const submitRefine = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!refineTarget) return
+
+    const cleanPrompt = refinePrompt.trim()
+    if (!cleanPrompt) {
+      setRefineError('Tell the agent what you want it to investigate further.')
+      return
+    }
+
+    setRefinePending(true)
+    setRefineError(null)
+    try {
+      await refine(refineTarget.creature, cleanPrompt)
+      setRefineTarget(null)
+      setRefinePrompt('')
+    } catch (cause) {
+      setRefineError(cause instanceof Error ? cause.message : 'Could not dig deeper')
+    } finally {
+      setRefinePending(false)
+    }
+  }
+
   const confirmDelete = () => {
     if (!deleteTarget) return
     if (deleteTarget.kind === 'room') {
@@ -624,11 +664,55 @@ function App() {
             )}
             <footer>
               <button type="button" onClick={() => dismissAlert(alert.id)}>DISMISS</button>
-              <button type="button" onClick={() => void refine(alert.creature)}>DIG DEEPER</button>
+              <button type="button" onClick={() => openRefineComposer(alert)}>DIG DEEPER</button>
             </footer>
           </article>
         ))}
       </section>
+
+      {refineTarget && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeRefineComposer}>
+          <section
+            className="spawn-modal refine-modal pixel-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="refine-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span>FOLLOW-UP · {refineTarget.creature.toUpperCase()}</span>
+              <button type="button" aria-label="Close follow-up prompt" disabled={refinePending} onClick={closeRefineComposer}>×</button>
+            </header>
+            <h2 id="refine-title">DIG DEEPER</h2>
+            <div className="refine-context">
+              <small>ORIGINAL FINDING</small>
+              <strong>{refineTarget.headline}</strong>
+            </div>
+            <form onSubmit={(event) => void submitRefine(event)}>
+              <label>
+                WHAT SHOULD {refineTarget.creature.toUpperCase()} INVESTIGATE?
+                <textarea
+                  autoFocus
+                  placeholder="Example: Verify the assumptions, find current web evidence, and give me three concrete next steps."
+                  value={refinePrompt}
+                  onChange={(event) => setRefinePrompt(event.target.value)}
+                />
+              </label>
+              <p className="quest-help">The agent keeps its existing session context and will return a new alert based on your follow-up.</p>
+              {refineError && <p className="form-error" role="alert">{refineError}</p>}
+              <div className="modal-actions">
+                <button type="button" disabled={refinePending} onClick={closeRefineComposer}>CANCEL</button>
+                <button
+                  type="submit"
+                  disabled={refinePending || !refinePrompt.trim() || connection !== 'online' || !apiKeyConfigured}
+                >
+                  {refinePending ? 'INVESTIGATING…' : 'SEND FOLLOW-UP'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       {showAddRoom && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowAddRoom(false)}>
