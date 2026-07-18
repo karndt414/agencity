@@ -12,6 +12,7 @@ export type CreatureAlert = {
   impact: string
   recommendation: string
   sources: string[]
+  phase?: string
 }
 
 type ConnectionState = 'connecting' | 'online' | 'offline'
@@ -31,6 +32,11 @@ type CityEvent = {
   creatures?: string[]
   token?: string
   tool?: string
+  phase?: string
+  from?: string
+  to?: string
+  headline?: string
+  coordinator?: string
   error?: string
   alert?: Omit<CreatureAlert, 'id' | 'creature'>
 }
@@ -127,12 +133,25 @@ export function useAgencity() {
             [event.creature!]: `Using ${event.tool ?? 'a tool'} to research the quest…`,
           }))
         }
+        if (event.type === 'collaboration' && event.to) {
+          setThoughts((current) => ({
+            ...current,
+            [event.to!]: `${event.from ?? 'A teammate'} shared: ${event.headline ?? 'new findings'}`,
+          }))
+        }
+        if (event.type === 'collaboration_start' && event.coordinator) {
+          setThoughts((current) => ({
+            ...current,
+            [event.coordinator!]: 'Reviewing the party’s specialist reports…',
+          }))
+        }
         if (event.type === 'alert' && event.creature && event.alert) {
           setAlerts((current) => [
             {
               ...event.alert!,
               id: crypto.randomUUID(),
               creature: event.creature!,
+              phase: event.phase,
               sources: event.alert!.sources ?? [],
             },
             ...current,

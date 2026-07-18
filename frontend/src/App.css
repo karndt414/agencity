@@ -1285,14 +1285,25 @@ p { margin: 0; }
   top: 88px;
   right: 288px;
   display: grid;
-  width: min(320px, calc(100vw - 520px));
-  max-height: calc(100vh - 174px);
+  width: min(360px, calc(100vw - 520px));
+  max-height: calc(100dvh - 112px);
+  grid-auto-rows: max-content;
   gap: 9px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 24px 0;
   pointer-events: none;
 }
 
+.alert-stack.has-long-output {
+  width: min(680px, calc(100vw - 520px));
+}
+
 .alert-card {
+  width: 100%;
+  min-height: max-content;
+  height: auto;
+  overflow: visible;
   padding: 10px;
   border-color: #8c593f;
   pointer-events: auto;
@@ -1328,6 +1339,12 @@ p { margin: 0; }
   color: #745548;
   font-size: 0.45rem;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.alert-card.is-expanded {
+  padding: 14px;
 }
 
 .alert-sources {
@@ -1528,7 +1545,14 @@ p { margin: 0; }
   .room-gadget,
   .room-plant { display: none; }
   .system-messages { top: 70px; width: min(400px, calc(100vw - 140px)); }
-  .alert-stack { top: 76px; right: 8px; width: min(300px, calc(100vw - 76px)); }
+  .alert-stack,
+  .alert-stack.has-long-output {
+    top: 76px;
+    right: 8px;
+    left: 70px;
+    width: auto;
+    max-height: calc(100dvh - 150px);
+  }
 }
 
 @media (max-width: 520px) {
@@ -1550,6 +1574,15 @@ p { margin: 0; }
   .room-plaque { top: 8px; left: 8px; padding: 4px; }
   .room-plaque small { display: none; }
   .pixel-character { transform: scale(0.78); transform-origin: bottom; }
+  .alert-stack,
+  .alert-stack.has-long-output {
+    top: 66px;
+    right: 8px;
+    bottom: 64px;
+    left: 8px;
+    width: auto;
+    max-height: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

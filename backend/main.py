@@ -12,6 +12,7 @@ from .alert_pipeline import CreatureAlert
 from .config import has_openai_api_key
 from .creature_manager import (
     DATA_FILES,
+    collaborate_on_quest,
     direct_creatures,
     load_data,
     refine_hunt,
@@ -165,7 +166,11 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
         )
         for name in names
     }
-    results = await direct_creatures(names, quest, data_by_creature, manager.broadcast)
+    results = (
+        await collaborate_on_quest(names, quest, data_by_creature, manager.broadcast)
+        if target == "all"
+        else await direct_creatures(names, quest, data_by_creature, manager.broadcast)
+    )
     return {
         "quest": quest,
         "target": target,

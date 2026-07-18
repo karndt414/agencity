@@ -131,7 +131,10 @@ async def _run(
             raise
 
     payload = alert.model_dump()
-    await _emit(sink, {"type": "alert", "creature": key, "alert": payload})
+    await _emit(
+        sink,
+        {"type": "alert", "creature": key, "phase": phase, "alert": payload},
+    )
     await _emit(sink, {"type": "state", "creature": key, "state": "found", "phase": phase})
     return alert
 
@@ -197,6 +200,97 @@ async def direct_creatures(
         return_exceptions=True,
     )
     return dict(zip(names, results))
+
+
+def select_quest_coordinator(quest: str, names: list[str]) -> str:
+    """Pick the existing specialist best suited to synthesize a party quest."""
+
+    normalized = quest.lower()
+    specialties = (
+        ("pyre", ("burn", "cost", "expense", "finance", "runway", "spend")),
+        ("sight", ("competitor", "market", "news", "research", "trend", "web")),
+        ("lode", ("candidate", "engineer", "hire", "hiring", "talent", "team")),
+        ("fetch", ("customer", "deal", "follow-up", "investor", "outreach", "sales")),
+    )
+    for creature, keywords in specialties:
+        if creature in names and any(keyword in normalized for keyword in keywords):
+            return creature
+    return "fetch" if "fetch" in names else names[0]
+
+
+async def collaborate_on_quest(
+    names: list[str],
+    quest: str,
+    data_by_creature: dict[str, dict[str, Any]],
+    sink: EventSink | None = None,
+) -> dict[str, CreatureAlert | Exception]:
+    """Run a party council: specialist research followed by peer synthesis."""
+
+    first_pass = await direct_creatures(names, quest, data_by_creature, sink)
+    reports = {
+        name: result
+        for name, result in first_pass.items()
+        if isinstance(result, CreatureAlert)
+    }
+    if len(reports) < 2:
+        return first_pass
+
+    coordinator = select_quest_coordinator(quest, list(reports))
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_start",
+            "quest": quest,
+            "coordinator": coordinator,
+            "participants": list(reports),
+        },
+    )
+    for name, report in reports.items():
+        if name == coordinator:
+            continue
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": name,
+                "to": coordinator,
+                "headline": report.headline,
+            },
+        )
+
+    peer_reports = {
+        name: report.model_dump()
+        for name, report in reports.items()
+    }
+    synthesis_input = (
+        "PARTY COUNCIL SYNTHESIS\n"
+        f"Founder quest: {quest.strip()}\n\n"
+        "Your fellow creatures completed independent specialist investigations. "
+        "Compare their evidence, resolve conflicts, connect findings across specialties, "
+        "and return one prioritized party recommendation. Preserve supporting URLs in "
+        "the `sources` field. You may use your tools or a handoff if a material gap remains.\n\n"
+        f"PEER REPORTS\n{json.dumps(peer_reports, ensure_ascii=False, indent=2)}"
+    )
+    try:
+        synthesis = await _run(
+            coordinator,
+            synthesis_input,
+            sink,
+            phase="synthesis",
+        )
+    except Exception as exc:
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_error",
+                "coordinator": coordinator,
+                "error": str(exc),
+            },
+        )
+        return first_pass
+
+    first_pass[coordinator] = synthesis
+    return first_pass
 
 
 async def release_all(

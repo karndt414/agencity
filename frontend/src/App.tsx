@@ -37,6 +37,14 @@ function safeSourceUrl(source: string): string | null {
   }
 }
 
+function isLongAlert(alert: {
+  details: string
+  recommendation: string
+  sources: string[]
+}): boolean {
+  return alert.details.length + alert.recommendation.length > 420 || alert.sources.length > 3
+}
+
 function App() {
   const {
     alerts,
@@ -230,10 +238,20 @@ function App() {
         {error && <div className="runtime-error pixel-panel" role="alert">{error}</div>}
       </div>
 
-      <section className="alert-stack" aria-label="Agent alerts" aria-live="polite">
+      <section
+        className={`alert-stack ${alerts.some(isLongAlert) ? 'has-long-output' : ''}`}
+        aria-label="Agent alerts"
+        aria-live="polite"
+      >
         {alerts.map((alert) => (
-          <article className="alert-card pixel-panel" key={alert.id}>
-            <header><b>{alert.creature}</b><span>{alert.impact}</span></header>
+          <article
+            className={`alert-card pixel-panel ${isLongAlert(alert) ? 'is-expanded' : ''}`}
+            key={alert.id}
+          >
+            <header>
+              <b>{alert.creature}</b>
+              <span>{alert.phase === 'synthesis' ? 'PARTY SYNTHESIS · ' : ''}{alert.impact}</span>
+            </header>
             <h2>{alert.headline}</h2>
             <p>{alert.details}</p>
             <strong>{alert.recommendation}</strong>
