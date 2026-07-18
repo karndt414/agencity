@@ -207,6 +207,7 @@ function PixelRoom({
   agentStates,
   availableCreatures,
   councilParticipants,
+  unreadCount,
   onSelect,
 }: {
   room: RoomData
@@ -215,6 +216,7 @@ function PixelRoom({
   agentStates: Record<string, CreatureState>
   availableCreatures: Set<string>
   councilParticipants: Set<string>
+  unreadCount: number
   onSelect: () => void
 }) {
   const runtimeMembers = room.members.filter((member) => (
@@ -260,6 +262,7 @@ function PixelRoom({
       </span>
       <PixelPlant className="room-plant" />
       <span className="room-team-count" aria-hidden="true">{room.members.length || '0'} CREW · {runtimeMembers.length} LIVE</span>
+      {unreadCount > 0 && <span className="room-mail-badge" aria-hidden="true">✉ {unreadCount}</span>}
       <span
         className="room-workstations"
         style={{ '--workstation-count': Math.max(1, room.members.length) } as CSSProperties}
@@ -301,6 +304,7 @@ type PixelOfficeProps = {
   agentStates?: Record<string, CreatureState>
   activities?: Record<string, OfficeActivity>
   collaboration?: OfficeCollaboration | null
+  unreadByRoom?: Record<string, number>
   onSelectRoom: (room: RoomData) => void
   zoom: number
   availableCreatures?: string[]
@@ -329,6 +333,7 @@ export default function PixelOffice({
   agentStates = {},
   activities = {},
   collaboration = null,
+  unreadByRoom = {},
   onSelectRoom,
   zoom,
   availableCreatures = [],
@@ -355,6 +360,7 @@ export default function PixelOffice({
         agentStates={agentStates}
         availableCreatures={availableCreatureSet}
         councilParticipants={councilParticipantSet}
+        unreadCount={unreadByRoom[room.id] ?? 0}
         onSelect={() => onSelectRoom(room)}
       />
     )
