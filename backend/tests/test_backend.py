@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from agents import WebSearchTool
@@ -8,7 +9,7 @@ from agents import WebSearchTool
 import backend.creature_manager as creature_manager
 from backend.alert_pipeline import CreatureAlert, parse_alert
 from backend.creatures import CREATURES
-from backend.creature_manager import select_quest_coordinator
+from backend.creature_manager import _usage_message, select_quest_coordinator
 from backend.main import app
 
 
@@ -133,3 +134,20 @@ def test_party_quest_routes_peer_reports_to_coordinator(monkeypatch) -> None:
     assert synthesis_calls == [("pyre", "synthesis")]
     assert results["pyre"].headline == "Party synthesis"
     assert len([event for event in events if event["type"] == "collaboration"]) == 3
+
+
+def test_usage_message_prices_cached_and_uncached_tokens() -> None:
+    message = _usage_message(
+        "pyre",
+        "gpt-5.4",
+        SimpleNamespace(
+            input_tokens=1_000,
+            output_tokens=200,
+            input_tokens_details=SimpleNamespace(cached_tokens=400),
+        ),
+    )
+
+    assert message["total_tokens"] == 1_200
+    assert message["cached_input_tokens"] == 400
+    assert message["estimated_cost_usd"] == 0.0046
+    assert message["pricing_available"] is True

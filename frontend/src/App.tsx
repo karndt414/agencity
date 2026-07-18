@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -6,7 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
+  type WheelEvent,
 } from 'react'
 import PixelOffice from './components/PixelOffice'
 import {
@@ -88,25 +89,6 @@ function isLongAlert(alert: {
   return alert.details.length + alert.recommendation.length > 420 || alert.sources.length > 3
 }
 
-type PanPoint = { x: number; y: number }
-
-type CameraView = {
-  zoom: number
-  pan: PanPoint
-}
-
-const MIN_ZOOM = 0.55
-const MAX_ZOOM = 2.25
-const RESET_PAN: PanPoint = { x: 0, y: 0 }
-
-type OfficeDrag = {
-  pointerId: number
-  startX: number
-  startY: number
-  origin: PanPoint
-  moved: boolean
-}
-
 function App() {
   const {
     alerts,
@@ -122,21 +104,21 @@ function App() {
     spawn,
     states,
     thoughts,
+    usage,
   } = useAgencity()
   const [rooms, setRooms] = useState<RoomData[]>(initialRooms)
   const [selectedRoomId, setSelectedRoomId] = useState('patch')
-  const [focusedRoomId, setFocusedRoomId] = useState<string | null>(null)
-  const [{ zoom, pan }, setCameraView] = useState<CameraView>({ zoom: 1, pan: RESET_PAN })
+  const [zoom, setZoom] = useState(1)
+  const [camera, setCamera] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
-  const [isWheelNavigating, setIsWheelNavigating] = useState(false)
-  const officeDrag = useRef<OfficeDrag | null>(null)
-  const suppressOfficeClick = useRef(false)
-  const wheelIdleTimer = useRef<number | null>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const commandInputRef = useRef<HTMLInputElement>(null)
+  const panRef = useRef<{ pointerId: number; x: number; y: number; cameraX: number; cameraY: number; moved: boolean } | null>(null)
+  const suppressRoomClickRef = useRef(false)
   const [showAddRoom, setShowAddRoom] = useState(false)
   const [roomName, setRoomName] = useState('Strategy Studio')
   const [roomPurpose, setRoomPurpose] = useState('Turn founder priorities into clear weekly plans.')
   const [roomKind, setRoomKind] = useState<AgentKind>('research')
-  const [showQuest, setShowQuest] = useState(false)
   const [questText, setQuestText] = useState('')
   const [questTarget, setQuestTarget] = useState('all')
   const [questError, setQuestError] = useState<string | null>(null)
@@ -153,6 +135,12 @@ function App() {
   )
   const [spawnData, setSpawnData] = useState('{"meetings": []}')
   const [spawnError, setSpawnError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    kind: 'room' | 'member'
+    roomId: string
+    memberId?: string
+    label: string
+  } | null>(null)
 
   const selectedRoom = useMemo(
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0],
@@ -176,8 +164,8 @@ function App() {
   const canRunSelected = Boolean(
     selectedCreature && connection === 'online' && apiKeyConfigured && selectedState !== 'hunting',
   )
-  const selectedQuest = lastQuest && selectedCreature && (
-    lastQuest.target === 'all' || lastQuest.target === selectedCreature
+  const selectedQuest = lastQuest && (
+    lastQuest.target === 'all' || lastQuest.target === selectedRoom.id
   ) ? lastQuest.text : selectedRoom.task
   const selectedWorkingMember = selectedRoom.members.find((member) => (
     member.backendCreature && creatures.includes(member.backendCreature) && states[member.backendCreature] === 'hunting'
@@ -196,116 +184,31 @@ function App() {
 
   const totalAgents = rooms.reduce((sum, room) => sum + room.members.length, 0)
 
-  const handleSelectRoom = (room: RoomData) => setSelectedRoomId(room.id)
-  const handleFocusRoom = (room: RoomData) => {
+  const handleSelectRoom = (room: RoomData) => {
     setSelectedRoomId(room.id)
-    setFocusedRoomId(room.id)
-    setCameraView((current) => ({ zoom: Math.max(1.65, current.zoom), pan: RESET_PAN }))
+    setQuestTarget(room.id)
   }
-
-  const resetOfficeView = () => {
-    setFocusedRoomId(null)
-    setCameraView({ zoom: 1, pan: RESET_PAN })
-  }
-
-  const handleOfficePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!event.isPrimary || event.button !== 0) return
-    suppressOfficeClick.current = false
-    officeDrag.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      origin: pan,
-      moved: false,
-    }
-  }
-
-  const handleOfficePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = officeDrag.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-
-    const deltaX = event.clientX - drag.startX
-    const deltaY = event.clientY - drag.startY
-    if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) return
-
-    if (!drag.moved) {
-      drag.moved = true
-      event.currentTarget.setPointerCapture(event.pointerId)
-      setIsPanning(true)
-    }
-    setCameraView((current) => ({
-      ...current,
-      pan: { x: drag.origin.x + deltaX, y: drag.origin.y + deltaY },
-    }))
-  }
-
-  const finishOfficeDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = officeDrag.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    suppressOfficeClick.current = drag.moved
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    officeDrag.current = null
-    setIsPanning(false)
-  }
-
-  const handleOfficeWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    event.preventDefault()
-
-    setIsWheelNavigating(true)
-    if (wheelIdleTimer.current !== null) window.clearTimeout(wheelIdleTimer.current)
-    wheelIdleTimer.current = window.setTimeout(() => {
-      setIsWheelNavigating(false)
-      wheelIdleTimer.current = null
-    }, 120)
-
-    const deltaScale = event.deltaMode === 1
-      ? 16
-      : event.deltaMode === 2
-        ? event.currentTarget.clientHeight
-        : 1
-    let deltaX = event.deltaX * deltaScale
-    let deltaY = event.deltaY * deltaScale
-
-    if (event.shiftKey && Math.abs(deltaX) < 1) {
-      deltaX = deltaY
-      deltaY = 0
-    }
-
-    if (!event.ctrlKey) {
-      setCameraView((current) => ({
-        ...current,
-        pan: {
-          x: current.pan.x - deltaX,
-          y: current.pan.y - deltaY,
-        },
-      }))
-      return
-    }
-
-    const viewport = event.currentTarget.getBoundingClientRect()
-    const pointerFromCenter = {
-      x: event.clientX - (viewport.left + viewport.width / 2),
-      y: event.clientY - (viewport.top + viewport.height / 2),
-    }
-    const zoomDelta = Math.max(-40, Math.min(40, deltaY))
-
-    setCameraView((current) => {
-      const nextZoom = Math.min(
-        MAX_ZOOM,
-        Math.max(MIN_ZOOM, current.zoom * Math.exp(-zoomDelta * 0.012)),
-      )
-      if (nextZoom === current.zoom) return current
-
-      const zoomRatio = nextZoom / current.zoom
-      return {
-        zoom: nextZoom,
-        pan: {
-          x: current.pan.x + (1 - zoomRatio) * (pointerFromCenter.x - current.pan.x),
-          y: current.pan.y + (1 - zoomRatio) * (pointerFromCenter.y - current.pan.y),
-        },
+  const handleFocusRoom = (room: RoomData) => {
+    handleSelectRoom(room)
+    const nextZoom = Math.max(1.15, zoom)
+    setZoom(nextZoom)
+    window.requestAnimationFrame(() => {
+      const viewport = viewportRef.current
+      const office = viewport?.querySelector<HTMLElement>('.pixel-office')
+      const roomElement = office?.querySelector<HTMLElement>(`[data-room-id="${room.id}"]`)
+      if (!viewport || !office || !roomElement) return
+      let centerX = roomElement.offsetWidth / 2
+      let centerY = roomElement.offsetHeight / 2
+      let node: HTMLElement | null = roomElement
+      while (node && node !== office) {
+        centerX += node.offsetLeft
+        centerY += node.offsetTop
+        node = node.offsetParent as HTMLElement | null
       }
+      setCamera({
+        x: viewport.clientWidth / 2 - centerX * nextZoom,
+        y: viewport.clientHeight / 2 - centerY * nextZoom,
+      })
     })
   }
 
@@ -315,42 +218,90 @@ function App() {
     setSpawnError(null)
   }
 
-  const openQuestForCreature = (creature: string) => {
-    setQuestTarget(creature)
-    setQuestError(null)
-    setShowQuest(true)
+  const fitOffice = useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const officeHeight = getOfficeHeight(rooms.length)
+    const officeWidth = 1180
+    const nextZoom = Math.min(1, Math.max(0.45,
+      Math.min((viewport.clientHeight - 20) / officeHeight, (viewport.clientWidth - 20) / officeWidth),
+    ))
+    setZoom(nextZoom)
+    setCamera({
+      x: (viewport.clientWidth - officeWidth * nextZoom) / 2,
+      y: (viewport.clientHeight - officeHeight * nextZoom) / 2,
+    })
+  }, [rooms.length])
+
+  const zoomAt = (nextZoom: number, clientX?: number, clientY?: number) => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const bounds = viewport.getBoundingClientRect()
+    const anchorX = (clientX ?? bounds.left + bounds.width / 2) - bounds.left
+    const anchorY = (clientY ?? bounds.top + bounds.height / 2) - bounds.top
+    const clamped = Math.min(2.25, Math.max(0.45, nextZoom))
+    setCamera((current) => ({
+      x: anchorX - ((anchorX - current.x) / zoom) * clamped,
+      y: anchorY - ((anchorY - current.y) / zoom) * clamped,
+    }))
+    setZoom(clamped)
   }
 
-  const fitOffice = () => {
-    const officeHeight = getOfficeHeight(rooms.length)
-    const officeWidth = Math.max(window.innerWidth, 900)
-    setFocusedRoomId(null)
-    setCameraView({
-      pan: RESET_PAN,
-      zoom: Math.min(1, Math.max(MIN_ZOOM,
-        Math.min((window.innerHeight - 16) / officeHeight, (window.innerWidth - 16) / officeWidth),
-      )),
-    })
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    zoomAt(zoom * Math.exp(-event.deltaY * 0.0012), event.clientX, event.clientY)
+  }
+
+  const handlePanStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, cameraX: camera.x, cameraY: camera.y, moved: false }
+    setIsPanning(true)
+  }
+
+  const handlePanMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = panRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 5) drag.moved = true
+    setCamera({ x: drag.cameraX + event.clientX - drag.x, y: drag.cameraY + event.clientY - drag.y })
+  }
+
+  const handlePanEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (panRef.current?.pointerId !== event.pointerId) return
+    const moved = panRef.current.moved
+    panRef.current = null
+    setIsPanning(false)
+    if (moved) {
+      suppressRoomClickRef.current = true
+      window.setTimeout(() => { suppressRoomClickRef.current = false }, 0)
+    }
   }
 
   useEffect(() => {
     window.localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify(rooms))
   }, [rooms])
 
-  useEffect(() => () => {
-    if (wheelIdleTimer.current !== null) window.clearTimeout(wheelIdleTimer.current)
-  }, [])
-
   useEffect(() => {
     const openQuestComposer = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        setShowQuest(true)
+        commandInputRef.current?.focus()
       }
     }
     window.addEventListener('keydown', openQuestComposer)
     return () => window.removeEventListener('keydown', openQuestComposer)
   }, [])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(fitOffice)
+    const handleResize = () => fitOffice()
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', handleResize)
+    }
+  // Fit changes when the building gains or loses a floor.
+  }, [fitOffice])
 
   const submitQuest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -364,9 +315,14 @@ function App() {
     setQuestError(null)
     setLastQuest({ text: cleanQuest, target: questTarget })
     try {
-      await giveQuest(cleanQuest, questTarget)
+      const targetRoom = rooms.find((room) => room.id === questTarget)
+      const targetLead = targetRoom?.members.find((member) => member.level === 'pm')
+      const backendTarget = questTarget === 'all'
+        ? 'all'
+        : targetLead?.backendCreature ?? (creatures.includes(questTarget) ? questTarget : null)
+      if (!backendTarget) throw new Error('This department needs a PM connected to the backend before it can receive quests.')
+      await giveQuest(cleanQuest, backendTarget)
       setQuestText('')
-      setShowQuest(false)
     } catch (cause) {
       setQuestError(cause instanceof Error ? cause.message : 'Could not dispatch quest')
     } finally {
@@ -428,46 +384,73 @@ function App() {
     }
     setRooms((current) => [...current, room])
     setSelectedRoomId(id)
-    setFocusedRoomId(id)
-    setCameraView({ zoom: 1.65, pan: RESET_PAN })
+    setQuestTarget(id)
     setShowAddRoom(false)
+    window.requestAnimationFrame(() => handleFocusRoom(room))
+  }
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return
+    if (deleteTarget.kind === 'room') {
+      if (rooms.length <= 1) {
+        setQuestError('Agencity needs at least one department.')
+        setDeleteTarget(null)
+        return
+      }
+      const remaining = rooms.filter((room) => room.id !== deleteTarget.roomId)
+      setRooms(remaining)
+      if (selectedRoomId === deleteTarget.roomId) {
+        setSelectedRoomId(remaining[0].id)
+        setQuestTarget(remaining[0].id)
+      }
+    } else {
+      setRooms((current) => current.map((room) => {
+        if (room.id !== deleteTarget.roomId) return room
+        const members = room.members.filter((member) => member.id !== deleteTarget.memberId)
+        const lead = members.find((member) => member.level === 'pm')
+        return {
+          ...room,
+          members,
+          agent: lead?.name ?? 'Open PM seat',
+          role: lead?.role ?? `${room.kind} workspace`,
+        }
+      }))
+    }
+    setDeleteTarget(null)
   }
 
   return (
     <main className="game-shell" style={roomStyle}>
       <div className="world-pixels" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
       <div
-        className={`office-viewport ${isPanning ? 'is-panning' : ''} ${isWheelNavigating ? 'is-navigating' : ''}`}
-        onClickCapture={(event) => {
-          if (!suppressOfficeClick.current) return
-          event.preventDefault()
-          event.stopPropagation()
-          suppressOfficeClick.current = false
-        }}
-        onPointerCancel={finishOfficeDrag}
-        onPointerDown={handleOfficePointerDown}
-        onPointerMove={handleOfficePointerMove}
-        onPointerUp={finishOfficeDrag}
-        onWheel={handleOfficeWheel}
+        ref={viewportRef}
+        className={`office-viewport ${isPanning ? 'is-panning' : ''}`}
+        onWheel={handleWheel}
+        onPointerDown={handlePanStart}
+        onPointerMove={handlePanMove}
+        onPointerUp={handlePanEnd}
+        onPointerCancel={handlePanEnd}
       >
         <PixelOffice
           rooms={rooms}
           selectedRoomId={selectedRoomId}
           agentStates={states}
-          onSelectRoom={handleFocusRoom}
+          onSelectRoom={(room) => {
+            if (!suppressRoomClickRef.current) handleFocusRoom(room)
+          }}
           zoom={zoom}
-          focusedRoomId={focusedRoomId}
-          pan={pan}
           availableCreatures={creatures}
+          camera={camera}
+          isPanning={isPanning}
         />
       </div>
 
       <div className="zoom-hud pixel-panel" aria-label="Office zoom controls">
-        <button type="button" aria-label="Zoom out" onClick={() => setCameraView((current) => ({ ...current, zoom: Math.max(MIN_ZOOM, current.zoom - 0.2) }))}>−</button>
-        <button className="zoom-readout" type="button" onClick={resetOfficeView}>{Math.round(zoom * 100)}%</button>
-        <button type="button" aria-label="Zoom in" onClick={() => setCameraView((current) => ({ ...current, zoom: Math.min(MAX_ZOOM, current.zoom + 0.2) }))}>+</button>
+        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(zoom - 0.2)}>−</button>
+        <button className="zoom-readout" type="button" onClick={() => zoomAt(1)}>{Math.round(zoom * 100)}%</button>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(zoom + 0.2)}>+</button>
         <button className="zoom-fit" type="button" onClick={fitOffice}>FIT</button>
-        <span className="pan-hint">PINCH TO ZOOM · TWO-FINGER PAN</span>
+        <span className="pan-hint">DRAG TO PAN · SCROLL TO ZOOM</span>
       </div>
 
       <header className="game-topbar">
@@ -478,8 +461,8 @@ function App() {
         <div className="resource-hud pixel-panel" aria-label="Company resources">
           <div><small>ROOMS</small><strong>{String(rooms.length).padStart(2, '0')}</strong></div>
           <div><small>AGENTS</small><strong>{String(totalAgents).padStart(2, '0')}</strong></div>
-          <div><small>XP</small><strong>078</strong></div>
-          <div><small>CREDITS</small><strong>$398</strong></div>
+          <div title={`${usage.inputTokens.toLocaleString()} input · ${usage.outputTokens.toLocaleString()} output`}><small>TOKENS</small><strong>{usage.totalTokens >= 1000 ? `${(usage.totalTokens / 1000).toFixed(1)}K` : usage.totalTokens}</strong></div>
+          <div title={usage.model ? `${usage.model} standard token pricing${usage.cachedInputTokens ? ` · ${usage.cachedInputTokens.toLocaleString()} cached` : ''}` : 'No API runs yet'}><small>EST. SPEND</small><strong>{usage.pricingAvailable ? `$${usage.estimatedCostUsd.toFixed(3)}` : 'N/A'}</strong></div>
         </div>
       </header>
 
@@ -494,7 +477,7 @@ function App() {
             <button
               className={`agent-card state-${agentState ?? 'local'} ${selectedRoomId === room.id ? 'is-active' : ''}`}
               key={room.id}
-              onClick={() => handleSelectRoom(room)}
+              onClick={() => handleFocusRoom(room)}
               style={{ '--agent-color': room.color, '--agent-soft': room.softColor } as CSSProperties}
               type="button"
             >
@@ -514,7 +497,7 @@ function App() {
       <aside className="mission-hud pixel-panel">
         <div className="mission-kicker">
           <span><i /> ACTIVE ROOM</span>
-          <b>{selectedState ? selectedState.toUpperCase() : 'LOCAL'}</b>
+          <div className="mission-actions"><b>{selectedState ? selectedState.toUpperCase() : 'LOCAL'}</b><button type="button" aria-label={`Delete ${selectedRoom.room}`} onClick={() => setDeleteTarget({ kind: 'room', roomId: selectedRoom.id, label: selectedRoom.room })}>DELETE</button></div>
         </div>
         <div className="mission-agent">
           <div className="mission-avatar">{roomIcon(selectedRoom)}</div>
@@ -577,9 +560,15 @@ function App() {
                   <em><i />{runtimeLabel}</em>
                   <b>{member.level === 'pm' ? 'PM' : 'SUB'}</b>
                 </div>
-                {runtimeAvailable && member.backendCreature && (
-                  <button type="button" onClick={() => openQuestForCreature(member.backendCreature!)}>ASSIGN</button>
-                )}
+                <div className="roster-actions">
+                  {runtimeAvailable && member.backendCreature && (
+                    <button type="button" onClick={() => {
+                      setQuestTarget(selectedRoom.id)
+                      commandInputRef.current?.focus()
+                    }}>ASSIGN</button>
+                  )}
+                  <button className="remove-member" type="button" aria-label={`Remove ${member.name}`} onClick={() => setDeleteTarget({ kind: 'member', roomId: selectedRoom.id, memberId: member.id, label: member.name })}>×</button>
+                </div>
               </div>
             )
           })}
@@ -640,57 +629,6 @@ function App() {
           </article>
         ))}
       </section>
-
-      {showQuest && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => !questPending && setShowQuest(false)}>
-          <section
-            className="spawn-modal quest-modal pixel-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="quest-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <span>PARTY COMMAND</span>
-              <button type="button" disabled={questPending} onClick={() => setShowQuest(false)}>×</button>
-            </header>
-            <h2 id="quest-title">GIVE THE PARTY A QUEST</h2>
-            <form onSubmit={(event) => void submitQuest(event)}>
-              <label>
-                ASSIGN TO
-                <select value={questTarget} onChange={(event) => setQuestTarget(event.target.value)}>
-                  <option value="all">ENTIRE PARTY</option>
-                  {creatures.map((creature) => (
-                    <option key={creature} value={creature}>{creature.toUpperCase()}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                QUEST
-                <textarea
-                  autoFocus
-                  placeholder="Example: Find the most urgent risk we should address this week."
-                  value={questText}
-                  onChange={(event) => setQuestText(event.target.value)}
-                />
-              </label>
-              <p className="quest-help">
-                Agents use their specialty, seeded data, session memory, and live web search when current public information is needed.
-              </p>
-              {questError && <p className="form-error" role="alert">{questError}</p>}
-              <div className="modal-actions">
-                <button type="button" disabled={questPending} onClick={() => setShowQuest(false)}>CANCEL</button>
-                <button
-                  type="submit"
-                  disabled={questPending || !apiKeyConfigured || connection !== 'online'}
-                >
-                  {questPending ? 'DISPATCHING…' : 'DISPATCH QUEST'}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      )}
 
       {showAddRoom && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowAddRoom(false)}>
@@ -785,10 +723,40 @@ function App() {
         </div>
       )}
 
-      <footer className="command-hud pixel-panel">
+      {deleteTarget && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setDeleteTarget(null)}>
+          <section className="spawn-modal delete-modal pixel-panel" role="dialog" aria-modal="true" aria-labelledby="delete-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header><span>OFFICE MANAGER</span><button type="button" onClick={() => setDeleteTarget(null)}>×</button></header>
+            <h2 id="delete-title">REMOVE {deleteTarget.label.toUpperCase()}?</h2>
+            <p className="quest-help">{deleteTarget.kind === 'room' ? 'The room and its visible team will be removed from this office.' : 'This agent will be unassigned from the department.'}</p>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setDeleteTarget(null)}>KEEP IT</button>
+              <button className="danger-button" type="button" onClick={confirmDelete}>REMOVE</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      <form className="command-hud pixel-panel" onSubmit={(event) => void submitQuest(event)}>
         <div className="founder-avatar">S</div>
-        <button className="command-input" type="button" onClick={() => setShowQuest(true)}>
-          <span>{lastQuest?.text ?? 'Give the party a new quest...'}</span><kbd>⌘K</kbd>
+        <select className="command-department" aria-label="Quest department" value={questTarget} onChange={(event) => {
+          setQuestTarget(event.target.value)
+          const room = rooms.find((candidate) => candidate.id === event.target.value)
+          if (room) handleFocusRoom(room)
+        }}>
+          <option value="all">ALL DEPTS</option>
+          {rooms.map((room) => <option key={room.id} value={room.id}>{room.room.toUpperCase()}</option>)}
+        </select>
+        <input
+          ref={commandInputRef}
+          className="command-input"
+          aria-label="Give agents a quest"
+          placeholder="Give this department a quest…"
+          value={questText}
+          onChange={(event) => setQuestText(event.target.value)}
+        />
+        <button className="dispatch-button" type="submit" disabled={questPending || !questText.trim() || connection !== 'online' || !apiKeyConfigured}>
+          {questPending ? 'SENDING…' : 'SEND'}
         </button>
         <button
           className="ship-button"
@@ -798,7 +766,8 @@ function App() {
         >
           RELEASE ALL <b>{CORE_CREATURES.filter((name) => states[name] === 'hunting').length}</b>
         </button>
-      </footer>
+        {questError && <span className="command-error" role="alert">{questError}</span>}
+      </form>
     </main>
   )
 }

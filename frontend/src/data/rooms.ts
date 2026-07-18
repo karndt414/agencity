@@ -42,7 +42,8 @@ export const ROOM_PALETTES: Record<AgentKind, Pick<RoomData, 'color' | 'softColo
 }
 
 export function getOfficeHeight(roomCount: number): number {
-  return Math.max(820, Math.ceil(roomCount / 3) * 330 + 220)
+  const floorRows = 3 + Math.ceil(Math.max(0, roomCount - 8) / 3)
+  return 140 + floorRows * 300
 }
 
 export const ROOMS: RoomData[] = [

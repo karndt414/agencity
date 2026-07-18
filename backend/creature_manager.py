@@ -20,6 +20,40 @@ DATA_FILES = {
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 _locks: dict[str, asyncio.Lock] = {}
 
+# Standard API token prices per one million tokens. The default Agencity model
+# is GPT-5.4; keeping the rates beside the usage calculation makes the HUD an
+# auditable estimate instead of a fictional credit balance.
+MODEL_PRICING: dict[str, tuple[float, float, float]] = {
+    "gpt-5.4": (2.50, 0.25, 15.00),
+    "gpt-5.4-mini": (0.75, 0.075, 4.50),
+    "gpt-5.4-nano": (0.20, 0.02, 1.25),
+}
+
+
+def _usage_message(creature: str, model: str, usage: Any) -> dict[str, Any]:
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    input_details = getattr(usage, "input_tokens_details", None)
+    cached_tokens = int(getattr(input_details, "cached_tokens", 0) or 0)
+    uncached_tokens = max(0, input_tokens - cached_tokens)
+    input_rate, cached_rate, output_rate = MODEL_PRICING.get(model, (0.0, 0.0, 0.0))
+    estimated_cost = (
+        uncached_tokens * input_rate
+        + cached_tokens * cached_rate
+        + output_tokens * output_rate
+    ) / 1_000_000
+    return {
+        "type": "usage",
+        "creature": creature,
+        "model": model,
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "estimated_cost_usd": round(estimated_cost, 8),
+        "pricing_available": model in MODEL_PRICING,
+    }
+
 
 def load_data(name: str) -> dict[str, Any]:
     key = normalize_name(name)
@@ -125,6 +159,8 @@ async def _run(
                 if message is not None:
                     await _emit(sink, message)
 
+            model = agent.model if isinstance(agent.model, str) else str(agent.model)
+            await _emit(sink, _usage_message(key, model, result.context_wrapper.usage))
             alert = parse_alert(result.final_output)
         except Exception as exc:
             await _emit(sink, {"type": "error", "creature": key, "error": str(exc)})

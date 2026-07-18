@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { SUPPORT_ACTIONS, getOfficeHeight, type AgentKind, type RoomData, type RoomMember } from '../data/rooms'
+import { type CSSProperties } from 'react'
 import type { CreatureState } from '../hooks/useAgencity'
 
 const gadgetLabel: Record<AgentKind, string> = {
@@ -178,6 +178,7 @@ function PixelRoom({
     '--room-soft': room.softColor,
     '--room-dark': room.darkColor,
     '--room-index': index,
+    ...roomGridPosition(index),
   } as CSSProperties
 
   return (
@@ -240,9 +241,25 @@ type PixelOfficeProps = {
   agentStates?: Record<string, CreatureState>
   onSelectRoom: (room: RoomData) => void
   zoom: number
-  focusedRoomId?: string | null
-  pan?: { x: number; y: number }
   availableCreatures?: string[]
+  camera: { x: number; y: number }
+  isPanning?: boolean
+}
+
+const RING_POSITIONS = [
+  [1, 2], [2, 1], [2, 3], [3, 1], [3, 3], [1, 1], [1, 3], [3, 2],
+] as const
+
+function roomGridPosition(index: number): CSSProperties {
+  if (index < RING_POSITIONS.length) {
+    const [row, column] = RING_POSITIONS[index]
+    return { gridRow: row, gridColumn: column }
+  }
+  const overflowIndex = index - RING_POSITIONS.length
+  return {
+    gridRow: 4 + Math.floor(overflowIndex / 3),
+    gridColumn: 1 + (overflowIndex % 3),
+  }
 }
 
 export default function PixelOffice({
@@ -251,63 +268,16 @@ export default function PixelOffice({
   agentStates = {},
   onSelectRoom,
   zoom,
-  focusedRoomId = null,
-  pan = { x: 0, y: 0 },
   availableCreatures = [],
+  camera,
+  isPanning = false,
 }: PixelOfficeProps) {
-  const officeRef = useRef<HTMLElement>(null)
-  const [camera, setCamera] = useState({ x: 0, y: 0 })
-  const firstFloorBreak = Math.min(3, Math.ceil(rooms.length / 2))
   const officeHeight = getOfficeHeight(rooms.length)
   const availableCreatureSet = new Set(availableCreatures)
 
-  useLayoutEffect(() => {
-    const updateCamera = () => {
-      const office = officeRef.current
-      if (!office || zoom === 1) {
-        setCamera({ x: 0, y: 0 })
-        return
-      }
-
-
-      const viewport = office.parentElement
-      const cameraCenterX = viewport ? viewport.clientWidth / 2 - office.offsetLeft : office.clientWidth / 2
-      const cameraCenterY = viewport ? viewport.clientHeight / 2 - office.offsetTop : office.clientHeight / 2
-
-      if (!focusedRoomId) {
-        setCamera({
-          x: cameraCenterX - office.clientWidth * zoom / 2,
-          y: cameraCenterY - office.clientHeight * zoom / 2,
-        })
-        return
-      }
-
-      const room = office.querySelector<HTMLElement>(`[data-room-id="${focusedRoomId}"]`)
-      if (!room) return
-
-      let x = room.offsetWidth / 2
-      let y = room.offsetHeight / 2
-      let node: HTMLElement | null = room
-      while (node && node !== office) {
-        x += node.offsetLeft
-        y += node.offsetTop
-        node = node.offsetParent as HTMLElement | null
-      }
-
-      setCamera({
-        x: cameraCenterX - x * zoom,
-        y: cameraCenterY - y * zoom,
-      })
-    }
-
-    updateCamera()
-    window.addEventListener('resize', updateCamera)
-    return () => window.removeEventListener('resize', updateCamera)
-  }, [focusedRoomId, rooms.length, zoom])
-
   const officeStyle = {
     '--office-height': `${officeHeight}px`,
-    transform: `matrix(${zoom}, 0, 0, ${zoom}, ${camera.x + pan.x}, ${camera.y + pan.y})`,
+    transform: `matrix(${zoom}, 0, 0, ${zoom}, ${camera.x}, ${camera.y})`,
   } as CSSProperties
 
   const renderRoom = (room: RoomData, index: number) => {
@@ -325,18 +295,11 @@ export default function PixelOffice({
   }
 
   return (
-    <section ref={officeRef} className="pixel-office" style={officeStyle} aria-label="Interactive Agencity office floor plan">
-      <div className="office-roof-sign" aria-hidden="true">
-        <span>AGENCITY</span><small>FOUNDERS' FLOOR</small>
-      </div>
-
+    <section className={`pixel-office ${isPanning ? 'is-panning' : ''}`} style={officeStyle} aria-label="Interactive Agencity office floor plan">
       <div className="office-building">
         <div className="office-plan">
-          {rooms.slice(0, firstFloorBreak).map(renderRoom)}
-
           <CollaborationRoom />
-
-          {rooms.slice(firstFloorBreak).map((room, index) => renderRoom(room, firstFloorBreak + index))}
+          {rooms.map(renderRoom)}
         </div>
       </div>
 

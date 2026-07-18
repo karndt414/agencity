@@ -4,6 +4,17 @@ export const CORE_CREATURES = ['pyre', 'fetch', 'sight', 'lode'] as const
 
 export type CreatureState = 'idle' | 'hunting' | 'found' | 'error'
 
+export type ApiUsage = {
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  totalTokens: number
+  estimatedCostUsd: number
+  runs: number
+  model: string
+  pricingAvailable: boolean
+}
+
 export type CreatureAlert = {
   id: string
   creature: string
@@ -37,6 +48,13 @@ type CityEvent = {
   to?: string
   headline?: string
   coordinator?: string
+  model?: string
+  input_tokens?: number
+  cached_input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  estimated_cost_usd?: number
+  pricing_available?: boolean
   error?: string
   alert?: Omit<CreatureAlert, 'id' | 'creature'>
 }
@@ -64,6 +82,16 @@ export function useAgencity() {
   const [alerts, setAlerts] = useState<CreatureAlert[]>([])
   const [thoughts, setThoughts] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  const [usage, setUsage] = useState<ApiUsage>({
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    estimatedCostUsd: 0,
+    runs: 0,
+    model: '',
+    pricingAvailable: true,
+  })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -143,6 +171,18 @@ export function useAgencity() {
           setThoughts((current) => ({
             ...current,
             [event.coordinator!]: 'Reviewing the party’s specialist reports…',
+          }))
+        }
+        if (event.type === 'usage') {
+          setUsage((current) => ({
+            inputTokens: current.inputTokens + (event.input_tokens ?? 0),
+            cachedInputTokens: current.cachedInputTokens + (event.cached_input_tokens ?? 0),
+            outputTokens: current.outputTokens + (event.output_tokens ?? 0),
+            totalTokens: current.totalTokens + (event.total_tokens ?? 0),
+            estimatedCostUsd: current.estimatedCostUsd + (event.estimated_cost_usd ?? 0),
+            runs: current.runs + 1,
+            model: event.model ?? current.model,
+            pricingAvailable: current.pricingAvailable && (event.pricing_available ?? false),
           }))
         }
         if (event.type === 'alert' && event.creature && event.alert) {
@@ -308,5 +348,6 @@ export function useAgencity() {
     spawn,
     states,
     thoughts,
+    usage,
   }
 }
