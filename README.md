@@ -95,7 +95,7 @@ Track: **UX for Agentic Applications**
 - Frontend: Vite + React + Three.js (React Three Fiber + Drei) + Tailwind overlay
 - Backend: FastAPI + WebSockets + asyncio
 - AI: OpenAI Agents SDK (`agents` package) — handoffs, sessions, streaming, built-in loop
-- Data: Pre-seeded JSON files
+- Data: Optional local JSON fixtures; never loaded automatically into agent runs
 - Deployment: Browser only — no Electron. F11 fullscreen for demo.
 
 **Why Vite website, not Electron:**

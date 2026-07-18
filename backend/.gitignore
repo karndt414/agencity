@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 data/sessions.db
 data/sessions.db-*
+data/spawned_creatures.json
+data/spawned_creatures.tmp

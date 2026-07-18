@@ -7,12 +7,14 @@ from typing import Any
 import agents
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .alert_pipeline import CreatureAlert
 from .config import ORCHESTRATOR_MODEL, WORKER_MODEL, has_openai_api_key
 from .creature_manager import (
     DATA_FILES,
+    collaborate_on_quest,
+    coordinate_room_quest,
     direct_creatures,
     load_data,
     orchestrate_quest,
@@ -22,9 +24,11 @@ from .creature_manager import (
 )
 from .creatures import CREATURES, get_creature, normalize_name
 from .reporting import render_task_report
-from .spawn import spawn_creature
+from .spawn import ensure_spawned_creature, restore_spawned_creatures, spawn_creature
 from .terminal_tools import TOOL_CATALOG, execute_python_check, execute_terminal_command
 from .workspace_tools import write_workspace_file_impl
+
+restore_spawned_creatures()
 
 
 class ConnectionManager:
@@ -67,6 +71,7 @@ class SpawnRequest(BaseModel):
 class QuestRequest(BaseModel):
     quest: str
     target: str = "all"
+    supporters: list[str] = Field(default_factory=list)
     data: dict[str, Any] | None = None
 
 
@@ -107,6 +112,7 @@ async def health() -> dict[str, Any]:
         "api_key_configured": has_openai_api_key(),
         "orchestrator_model": ORCHESTRATOR_MODEL,
         "worker_model": WORKER_MODEL,
+        "evidence_policy": "web-first",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -202,9 +208,8 @@ async def task_endpoint(request: TaskRequest) -> dict[str, Any]:
 async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict[str, Any]:
     supplied = request.data if request and request.data else {}
     data = {
-        name: supplied.get(name, load_data(name))
+        name: supplied.get(name, {})
         for name in CREATURES
-        if name in DATA_FILES
     }
     results = await release_all(data, manager.broadcast)
     return {
@@ -216,7 +221,7 @@ async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict
 async def hunt_endpoint(name: str, request: HuntRequest | None = None) -> dict[str, Any]:
     key = normalize_name(name)
     get_creature(key)
-    data = request.data if request and request.data is not None else load_data(key)
+    data = request.data if request and request.data is not None else {}
     alert = await run_hunt(key, data, manager.broadcast)
     return {"creature": key, "status": "found", "alert": alert.model_dump()}
 
@@ -231,12 +236,34 @@ async def refine_endpoint(name: str, request: RefineRequest) -> dict[str, Any]:
 
 @app.post("/api/creatures/spawn")
 async def spawn_endpoint(request: SpawnRequest) -> dict[str, str]:
-    creature = spawn_creature(request.name, request.instructions, request.model)
+    try:
+        creature = spawn_creature(request.name, request.instructions, request.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     key = normalize_name(request.name)
     await manager.broadcast(
         {"type": "spawned", "creature": key, "name": creature.name}
     )
     return {"creature": key, "name": creature.name}
+
+
+@app.post("/api/creatures/ensure")
+async def ensure_creature_endpoint(request: SpawnRequest) -> dict[str, str]:
+    creature, created = ensure_spawned_creature(
+        request.name,
+        request.instructions,
+        request.model,
+    )
+    key = normalize_name(request.name)
+    if created:
+        await manager.broadcast(
+            {"type": "spawned", "creature": key, "name": creature.name}
+        )
+    return {
+        "creature": key,
+        "name": creature.name,
+        "status": "restored" if created else "existing",
+    }
 
 
 @app.post("/api/quests")
@@ -255,33 +282,47 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         names = [target]
 
+    supporters = list(dict.fromkeys(
+        normalize_name(name)
+        for name in request.supporters
+        if normalize_name(name) != target
+    ))
+    for supporter in supporters:
+        try:
+            get_creature(supporter)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     data_by_creature = {
         name: (
             request.data
             if request.data is not None
-            else load_data(name) if name in DATA_FILES else {}
+            else {}
         )
         for name in names
     }
-    report = None
-    if target == "all":
-        results, report = await orchestrate_quest(
-            names,
-            quest,
-            data_by_creature,
-            manager.broadcast,
+    for supporter in supporters:
+        data_by_creature[supporter] = request.data if request.data is not None else {}
+    results = (
+        await collaborate_on_quest(names, quest, data_by_creature, manager.broadcast)
+        if target == "all"
+        else (
+            await coordinate_room_quest(
+                target,
+                supporters,
+                quest,
+                data_by_creature,
+                manager.broadcast,
+            )
+            if supporters
+            else await direct_creatures(names, quest, data_by_creature, manager.broadcast)
         )
-    else:
-        results = await direct_creatures(names, quest, data_by_creature, manager.broadcast)
-
-    response: dict[str, Any] = {
+    )
+    return {
         "quest": quest,
         "target": target,
         "results": _result_payload(results),
     }
-    if report is not None:
-        response["report"] = report.model_dump()
-    return response
 
 
 @app.websocket("/ws")

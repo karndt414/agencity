@@ -70,6 +70,22 @@ def _data_source_reference(name: str) -> str:
     return f"backend/data/{filename}" if filename else "founder-supplied task data"
 
 
+def _internal_context(data: dict[str, Any]) -> str:
+    if not data:
+        return (
+            "INTERNAL CONTEXT\n"
+            "None supplied. Do not infer private company facts. Use live public web "
+            "research and identify any private fields needed for a complete answer."
+        )
+    return (
+        "OPTIONAL USER-SUPPLIED INTERNAL CONTEXT — UNVERIFIED\n"
+        "Treat this only as supplemental private context. Label any claim derived from "
+        "it as user-supplied, do not search for its private identifiers or values, and "
+        "do not use it as a substitute for current public web evidence.\n"
+        f"{json.dumps(data, ensure_ascii=False, indent=2)}"
+    )
+
+
 def _lock_for(name: str) -> asyncio.Lock:
     key = normalize_name(name)
     if key not in _locks:
@@ -147,6 +163,8 @@ async def _run(
     input_text: str,
     sink: EventSink | None,
     phase: str,
+    *,
+    publish_alert: bool = True,
 ) -> CreatureAlert:
     key = normalize_name(name)
     agent = get_creature(key)
@@ -174,10 +192,11 @@ async def _run(
             raise
 
     payload = alert.model_dump()
-    await _emit(
-        sink,
-        {"type": "alert", "creature": key, "phase": phase, "alert": payload},
-    )
+    if publish_alert:
+        await _emit(
+            sink,
+            {"type": "alert", "creature": key, "phase": phase, "alert": payload},
+        )
     await _emit(sink, {"type": "state", "creature": key, "state": "found", "phase": phase})
     return alert
 
@@ -246,7 +265,12 @@ async def hunt_creature(
 ) -> CreatureAlert:
     return await _run(
         name,
-        json.dumps(data, ensure_ascii=False, indent=2),
+        (
+            "AUTONOMOUS WEB-FIRST HUNT\n"
+            "Search the live public web for the strongest current signal in your "
+            "specialty. Cite exact URLs and distinguish fact from inference.\n\n"
+            f"{_internal_context(data)}"
+        ),
         sink,
         phase="hunt",
     )
@@ -259,7 +283,18 @@ async def refine_hunt(
 ) -> CreatureAlert:
     if not follow_up.strip():
         raise ValueError("Follow-up prompt is required")
-    return await _run(name, follow_up.strip(), sink, phase="refine")
+    return await _run(
+        name,
+        (
+            "WEB-FIRST FOLLOW-UP\n"
+            f"{follow_up.strip()}\n\n"
+            "Search the live public web before answering. Treat any internal claims in "
+            "session memory as unverified unless the founder explicitly supplied them, "
+            "and preserve exact supporting URLs in `sources`."
+        ),
+        sink,
+        phase="refine",
+    )
 
 
 async def direct_creature(
@@ -275,14 +310,15 @@ async def direct_creature(
         raise ValueError("Quest is required")
 
     input_text = (
-        "NEW QUEST FROM THE FOUNDER\n"
+        "NEW WEB-FIRST QUEST FROM THE FOUNDER\n"
         f"{clean_quest}\n\n"
-        "Complete this quest using your specialty and the available data below. "
-        "Return the most actionable structured alert you can support. Cite every factual "
-        "claim: use exact URLs for web research and cite the supplied data source below for "
-        "private records.\n\n"
-        f"SUPPLIED DATA SOURCE\n{_data_source_reference(key)}\n\n"
-        f"AVAILABLE DATA\n{json.dumps(data, ensure_ascii=False, indent=2)}"
+        "Search the live public web first. Complete this quest using your specialty "
+        "and the available data. Cite every factual claim with exact supporting URLs; "
+        "if a supplied private record informs the answer, cite the supplied data "
+        "reference below and label it as user-provided. Return the most actionable "
+        "structured alert supported by current evidence.\n\n"
+        f"SUPPLIED DATA REFERENCE\n{_data_source_reference(name)}\n\n"
+        f"{_internal_context(data)}"
     )
     return await _run(name, input_text, sink, phase="quest")
 
@@ -303,6 +339,147 @@ async def direct_creatures(
         return_exceptions=True,
     )
     return dict(zip(names, results))
+
+
+async def support_room_quest(
+    name: str,
+    coordinator: str,
+    quest: str,
+    data: dict[str, Any],
+    sink: EventSink | None = None,
+) -> CreatureAlert:
+    """Research one delegated workstream without publishing a room-level answer."""
+
+    input_text = (
+        "DELEGATED SUPPORT ASSIGNMENT FROM YOUR ROOM PM\n"
+        f"Room PM: {coordinator}\n"
+        f"Founder quest: {quest.strip()}\n\n"
+        "You are a supporting specialist, not the room decision-maker. Search the live "
+        "public web for evidence in your specialty, cite exact URLs, and report concise "
+        "findings and risks back to your PM. Do not present your work as the room's final "
+        "answer; the PM will compare all supporting reports and make the final call.\n\n"
+        f"{_internal_context(data)}"
+    )
+    return await _run(
+        name,
+        input_text,
+        sink,
+        phase="support",
+        publish_alert=False,
+    )
+
+
+async def coordinate_room_quest(
+    coordinator: str,
+    supporters: list[str],
+    quest: str,
+    data_by_creature: dict[str, dict[str, Any]],
+    sink: EventSink | None = None,
+) -> dict[str, CreatureAlert | Exception]:
+    """Let a room PM delegate research and publish the room's final synthesis."""
+
+    pm = normalize_name(coordinator)
+    team = list(dict.fromkeys(
+        normalize_name(name)
+        for name in supporters
+        if normalize_name(name) != pm
+    ))
+    if not team:
+        result = await direct_creature(pm, quest, data_by_creature.get(pm, {}), sink)
+        return {pm: result}
+
+    participants = [pm, *team]
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_start",
+            "workflow": "room_hierarchy",
+            "quest": quest,
+            "coordinator": pm,
+            "participants": participants,
+        },
+    )
+    for supporter in team:
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": pm,
+                "to": supporter,
+                "headline": "Delegated a supporting research workstream",
+            },
+        )
+
+    support_results = await asyncio.gather(
+        *(
+            support_room_quest(
+                supporter,
+                pm,
+                quest,
+                data_by_creature.get(supporter, {}),
+                sink,
+            )
+            for supporter in team
+        ),
+        return_exceptions=True,
+    )
+    results: dict[str, CreatureAlert | Exception] = dict(zip(team, support_results))
+    reports = {
+        name: result
+        for name, result in results.items()
+        if isinstance(result, CreatureAlert)
+    }
+    for name, report in reports.items():
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": name,
+                "to": pm,
+                "headline": report.headline,
+            },
+        )
+
+    support_reports = {
+        name: report.model_dump()
+        for name, report in reports.items()
+    }
+    synthesis_input = (
+        "ROOM PM FINAL SYNTHESIS\n"
+        f"Founder quest: {quest.strip()}\n\n"
+        "You are the room PM and final decision-maker. Your subagents completed delegated "
+        "specialist research below. Evaluate their evidence, resolve conflicts, fill any "
+        "material gaps with live public web research, and publish one clear room-level "
+        "answer. Preserve exact supporting URLs, distinguish fact from inference, and "
+        "take responsibility for the final prioritization.\n\n"
+        f"SUPPORTING REPORTS\n{json.dumps(support_reports, ensure_ascii=False, indent=2)}\n\n"
+        f"{_internal_context(data_by_creature.get(pm, {}))}"
+    )
+    try:
+        results[pm] = await _run(pm, synthesis_input, sink, phase="synthesis")
+    except Exception as exc:
+        results[pm] = exc
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_error",
+                "coordinator": pm,
+                "participants": participants,
+                "error": str(exc),
+            },
+        )
+        return results
+
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_end",
+            "coordinator": pm,
+            "participants": participants,
+            "status": "found",
+        },
+    )
+    return results
 
 
 def select_quest_coordinator(quest: str, names: list[str]) -> str:
@@ -327,10 +504,94 @@ async def collaborate_on_quest(
     data_by_creature: dict[str, dict[str, Any]],
     sink: EventSink | None = None,
 ) -> dict[str, CreatureAlert | Exception]:
-    """Backward-compatible wrapper around the worker/orchestrator task harness."""
+    """Run a party council: specialist research followed by peer synthesis."""
 
-    results, _ = await orchestrate_quest(names, quest, data_by_creature, sink)
-    return results
+    first_pass = await direct_creatures(names, quest, data_by_creature, sink)
+    reports = {
+        name: result
+        for name, result in first_pass.items()
+        if isinstance(result, CreatureAlert)
+    }
+    if len(reports) < 2:
+        return first_pass
+
+    coordinator = select_quest_coordinator(quest, list(reports))
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_start",
+            "quest": quest,
+            "coordinator": coordinator,
+            "participants": list(reports),
+        },
+    )
+    for name, report in reports.items():
+        if name == coordinator:
+            continue
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": name,
+                "to": coordinator,
+                "headline": report.headline,
+            },
+        )
+
+    peer_reports = {
+        name: report.model_dump()
+        for name, report in reports.items()
+    }
+    synthesis_input = (
+        "PARTY COUNCIL SYNTHESIS\n"
+        f"Founder quest: {quest.strip()}\n\n"
+        "Your fellow creatures completed independent specialist investigations. "
+        "Compare their evidence, resolve conflicts, connect findings across specialties, "
+        "and return one prioritized party recommendation. Search the live web to verify "
+        "the most important claims before synthesizing. Every factual claim must retain "
+        "an exact supporting URL or an explicit supplied-data/repository reference in "
+        "the `sources` field. Treat peer claims without traceable sources as unverified "
+        "and omit them from the final answer.\n\n"
+        f"PEER REPORTS\n{json.dumps(peer_reports, ensure_ascii=False, indent=2)}"
+    )
+    try:
+        synthesis = await _run(
+            coordinator,
+            synthesis_input,
+            sink,
+            phase="synthesis",
+        )
+    except Exception as exc:
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_error",
+                "coordinator": coordinator,
+                "error": str(exc),
+            },
+        )
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_end",
+                "coordinator": coordinator,
+                "participants": list(reports),
+                "status": "error",
+            },
+        )
+        return first_pass
+
+    first_pass[coordinator] = synthesis
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_end",
+            "coordinator": coordinator,
+            "participants": list(reports),
+            "status": "found",
+        },
+    )
+    return first_pass
 
 
 async def orchestrate_quest(

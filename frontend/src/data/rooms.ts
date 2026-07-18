@@ -15,6 +15,7 @@ export type RoomMember = {
   kind: AgentKind
   level: 'pm' | 'subagent'
   backendCreature?: string
+  instructions?: string
 }
 
 export type RoomData = {
@@ -50,7 +51,7 @@ export const ROOMS: RoomData[] = [
   {
     id: 'pyre',
     agent: 'Pyre',
-    room: 'Runway Room',
+    room: 'Entrepreneurship',
     role: 'Finance watchdog',
     status: 'Reviewing burn',
     task: 'Found 3 silent SaaS renewals',
@@ -69,7 +70,7 @@ export const ROOMS: RoomData[] = [
   {
     id: 'fetch',
     agent: 'Fetch',
-    room: 'Deal Lounge',
+    room: 'Sales',
     role: 'Growth closer',
     status: 'Drafting follow-up',
     task: '2 warm intros ready to send',
@@ -88,7 +89,7 @@ export const ROOMS: RoomData[] = [
   {
     id: 'sight',
     agent: 'Sight',
-    room: 'Research Library',
+    room: 'Research',
     role: 'Market researcher',
     status: 'Scanning signals',
     task: 'Mapped 4 competitor moves',
@@ -107,7 +108,7 @@ export const ROOMS: RoomData[] = [
   {
     id: 'lode',
     agent: 'Lode',
-    room: 'Talent Atelier',
+    room: 'Recruiting',
     role: 'Talent scout',
     status: 'Curating shortlist',
     task: '5 high-fit builders surfaced',
@@ -126,7 +127,7 @@ export const ROOMS: RoomData[] = [
   {
     id: 'patch',
     agent: 'Patch',
-    room: 'Build Garage',
+    room: 'Engineering',
     role: 'Codex engineer',
     status: 'Running tests',
     task: 'Landing page build is 82% done',

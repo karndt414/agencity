@@ -17,3 +17,5 @@ backend/.pytest_cache/
 backend/*.pyc
 backend/data/sessions.db
 backend/data/sessions.db-*
+backend/data/spawned_creatures.json
+backend/data/spawned_creatures.tmp

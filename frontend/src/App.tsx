@@ -19,7 +19,7 @@ import {
   type RoomData,
   type RoomMember,
 } from './data/rooms'
-import { CORE_CREATURES, useAgencity, type CreatureState } from './hooks/useAgencity'
+import { CORE_CREATURES, useAgencity, type CreatureAlert, type CreatureState } from './hooks/useAgencity'
 import agencityGreenLogo from '../../assets/agencitygreen.png'
 import './App.css'
 
@@ -40,6 +40,8 @@ const kindIcons: Record<AgentKind, string> = {
 }
 
 const ROOM_STORAGE_KEY = 'agencity.rooms.v2'
+const ALL_ROOMS_INBOX = '__all_rooms__'
+const defaultRoomNames = new Map(ROOMS.map((room) => [room.id, room.room]))
 
 function initialRooms(): RoomData[] {
   try {
@@ -47,7 +49,11 @@ function initialRooms(): RoomData[] {
     if (!saved) return ROOMS
     const parsed = JSON.parse(saved) as RoomData[]
     if (!Array.isArray(parsed) || parsed.length === 0) return ROOMS
-    return parsed.map((room) => ({ ...room, members: room.members ?? [] }))
+    return parsed.map((room) => ({
+      ...room,
+      room: defaultRoomNames.get(room.id) ?? room.room,
+      members: room.members ?? [],
+    }))
   } catch {
     return ROOMS
   }
@@ -81,24 +87,33 @@ function safeSourceUrl(source: string): string | null {
   }
 }
 
-function isLongAlert(alert: {
-  details: string
-  recommendation: string
-  sources: string[]
-}): boolean {
-  return alert.details.length + alert.recommendation.length > 420 || alert.sources.length > 3
+function roomIdForCreature(rooms: RoomData[], creature: string): string | null {
+  const room = rooms.find((candidate) => (
+    candidate.id === creature
+    || candidate.members.some((member) => member.backendCreature === creature)
+  ))
+  return room?.id ?? null
+}
+
+function formatInboxTime(createdAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(createdAt)
 }
 
 function App() {
   const {
+    activities,
     alerts,
     apiKeyConfigured,
     connection,
+    collaboration,
     creatures,
     dismissAlert,
     error,
+    ensureCreature,
     giveQuest,
-    hunt,
     refine,
     releaseAll,
     reports,
@@ -110,10 +125,12 @@ function App() {
   const [rooms, setRooms] = useState<RoomData[]>(initialRooms)
   const [selectedRoomId, setSelectedRoomId] = useState('patch')
   const [zoom, setZoom] = useState(1)
+  const [fitZoom, setFitZoom] = useState(1)
   const [camera, setCamera] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const viewportRef = useRef<HTMLDivElement>(null)
   const commandInputRef = useRef<HTMLInputElement>(null)
+  const restoringCreaturesRef = useRef(new Set<string>())
   const panRef = useRef<{ pointerId: number; x: number; y: number; cameraX: number; cameraY: number; moved: boolean } | null>(null)
   const suppressRoomClickRef = useRef(false)
   const [showAddRoom, setShowAddRoom] = useState(false)
@@ -136,6 +153,13 @@ function App() {
   )
   const [spawnData, setSpawnData] = useState('{"meetings": []}')
   const [spawnError, setSpawnError] = useState<string | null>(null)
+  const [refineTarget, setRefineTarget] = useState<CreatureAlert | null>(null)
+  const [refinePrompt, setRefinePrompt] = useState('')
+  const [refineError, setRefineError] = useState<string | null>(null)
+  const [refinePending, setRefinePending] = useState(false)
+  const [inboxRoomId, setInboxRoomId] = useState<string | null>(null)
+  const [activeInboxAlertId, setActiveInboxAlertId] = useState<string | null>(null)
+  const [readAlertIds, setReadAlertIds] = useState<Set<string>>(() => new Set())
   const [deleteTarget, setDeleteTarget] = useState<{
     kind: 'room' | 'member'
     roomId: string
@@ -166,7 +190,9 @@ function App() {
     selectedCreature && connection === 'online' && apiKeyConfigured && selectedState !== 'hunting',
   )
   const selectedQuest = lastQuest && (
-    lastQuest.target === 'all' || lastQuest.target === selectedRoom.id
+    lastQuest.target === 'all'
+    || lastQuest.target === selectedRoom.id
+    || selectedRoom.members.some((member) => `agent:${member.backendCreature}` === lastQuest.target)
   ) ? lastQuest.text : selectedRoom.task
   const selectedWorkingMember = selectedRoom.members.find((member) => (
     member.backendCreature && creatures.includes(member.backendCreature) && states[member.backendCreature] === 'hunting'
@@ -175,6 +201,43 @@ function App() {
   const selectedSupportingMembers = selectedRoomIsWorking
     ? selectedRoom.members.filter((member) => member.level === 'subagent' && !member.backendCreature)
     : []
+  const alertsByRoom = useMemo(() => {
+    const grouped = Object.fromEntries(rooms.map((room) => [room.id, [] as CreatureAlert[]]))
+    alerts.forEach((alert) => {
+      const roomId = roomIdForCreature(rooms, alert.creature)
+      if (roomId) grouped[roomId]?.push(alert)
+    })
+    return grouped
+  }, [alerts, rooms])
+  const unreadByRoom = useMemo(() => Object.fromEntries(rooms.map((room) => [
+    room.id,
+    (alertsByRoom[room.id] ?? []).filter((alert) => !readAlertIds.has(alert.id)).length,
+  ])), [alertsByRoom, readAlertIds, rooms])
+  const totalUnread = Object.values(unreadByRoom).reduce((total, count) => total + count, 0)
+  const inboxShowsAllRooms = inboxRoomId === ALL_ROOMS_INBOX
+  const inboxRoom = rooms.find((room) => room.id === inboxRoomId) ?? null
+  const inboxAlerts = useMemo(
+    () => {
+      if (inboxRoomId === ALL_ROOMS_INBOX) {
+        return alerts.filter((alert) => roomIdForCreature(rooms, alert.creature))
+      }
+      return inboxRoomId ? alertsByRoom[inboxRoomId] ?? [] : []
+    },
+    [alerts, alertsByRoom, inboxRoomId, rooms],
+  )
+  const inboxUnreadCount = inboxAlerts.filter((alert) => !readAlertIds.has(alert.id)).length
+  const activeInboxAlert = inboxAlerts.find((alert) => alert.id === activeInboxAlertId) ?? null
+  const activeInboxRoom = activeInboxAlert
+    ? rooms.find((room) => room.id === roomIdForCreature(rooms, activeInboxAlert.creature)) ?? null
+    : null
+  const latestUnreadEntry = useMemo(() => {
+    for (const alert of alerts) {
+      if (readAlertIds.has(alert.id)) continue
+      const roomId = roomIdForCreature(rooms, alert.creature)
+      if (roomId) return { alert, roomId }
+    }
+    return null
+  }, [alerts, readAlertIds, rooms])
 
   const roomStyle = {
     '--room-color': selectedRoom.color,
@@ -184,6 +247,56 @@ function App() {
   } as CSSProperties
 
   const totalAgents = rooms.reduce((sum, room) => sum + room.members.length, 0)
+
+  const markAlertRead = useCallback((alertId: string) => {
+    setReadAlertIds((current) => {
+      if (current.has(alertId)) return current
+      return new Set([...current, alertId])
+    })
+  }, [])
+
+  const openRoomInbox = (scope: string, preferredAlertId?: string) => {
+    const scopedAlerts = scope === ALL_ROOMS_INBOX
+      ? alerts.filter((alert) => roomIdForCreature(rooms, alert.creature))
+      : alertsByRoom[scope] ?? []
+    const nextAlert = scopedAlerts.find((alert) => alert.id === preferredAlertId)
+      ?? scopedAlerts.find((alert) => !readAlertIds.has(alert.id))
+      ?? scopedAlerts[0]
+    if (scope !== ALL_ROOMS_INBOX) {
+      setSelectedRoomId(scope)
+      setQuestTarget(scope)
+    }
+    setInboxRoomId(scope)
+    setActiveInboxAlertId(nextAlert?.id ?? null)
+    if (nextAlert) markAlertRead(nextAlert.id)
+  }
+
+  const selectInboxAlert = (alertId: string) => {
+    setActiveInboxAlertId(alertId)
+    markAlertRead(alertId)
+  }
+
+  const markInboxRead = () => {
+    setReadAlertIds((current) => new Set([
+      ...current,
+      ...inboxAlerts.map((alert) => alert.id),
+    ]))
+  }
+
+  const removeInboxAlert = (alertId: string) => {
+    const remaining = inboxAlerts.filter((alert) => alert.id !== alertId)
+    dismissAlert(alertId)
+    const nextAlert = remaining[0]
+    setActiveInboxAlertId(nextAlert?.id ?? null)
+    if (nextAlert) markAlertRead(nextAlert.id)
+  }
+
+  useEffect(() => {
+    if (!inboxRoomId || activeInboxAlertId || inboxAlerts.length === 0) return
+    const nextAlert = inboxAlerts.find((alert) => !readAlertIds.has(alert.id)) ?? inboxAlerts[0]
+    setActiveInboxAlertId(nextAlert.id)
+    markAlertRead(nextAlert.id)
+  }, [activeInboxAlertId, inboxAlerts, inboxRoomId, markAlertRead, readAlertIds])
 
   const handleSelectRoom = (room: RoomData) => {
     setSelectedRoomId(room.id)
@@ -227,6 +340,7 @@ function App() {
     const nextZoom = Math.min(1, Math.max(0.45,
       Math.min((viewport.clientHeight - 20) / officeHeight, (viewport.clientWidth - 20) / officeWidth),
     ))
+    setFitZoom(nextZoom)
     setZoom(nextZoom)
     setCamera({
       x: (viewport.clientWidth - officeWidth * nextZoom) / 2,
@@ -255,15 +369,18 @@ function App() {
 
   const handlePanStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
-    event.currentTarget.setPointerCapture(event.pointerId)
     panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, cameraX: camera.x, cameraY: camera.y, moved: false }
-    setIsPanning(true)
   }
 
   const handlePanMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = panRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
-    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 5) drag.moved = true
+    if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 5) {
+      drag.moved = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setIsPanning(true)
+    }
+    if (!drag.moved) return
     setCamera({ x: drag.cameraX + event.clientX - drag.x, y: drag.cameraY + event.clientY - drag.y })
   }
 
@@ -281,6 +398,39 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify(rooms))
   }, [rooms])
+
+  useEffect(() => {
+    if (connection !== 'online') return
+
+    const missingAgents = new Map<string, RoomMember>()
+    rooms.forEach((room) => room.members.forEach((member) => {
+      if (
+        member.backendCreature
+        && !creatures.includes(member.backendCreature)
+        && !restoringCreaturesRef.current.has(member.backendCreature)
+      ) {
+        missingAgents.set(member.backendCreature, member)
+      }
+    }))
+
+    missingAgents.forEach((member, expectedCreature) => {
+      restoringCreaturesRef.current.add(expectedCreature)
+      void ensureCreature(member.name, member.instructions ?? member.role)
+        .then((restoredCreature) => {
+          if (restoredCreature === expectedCreature) return
+          setRooms((current) => current.map((room) => ({
+            ...room,
+            members: room.members.map((candidate) => (
+              candidate.backendCreature === expectedCreature
+                ? { ...candidate, backendCreature: restoredCreature }
+                : candidate
+            )),
+          })))
+        })
+        .catch(() => undefined)
+        .finally(() => restoringCreaturesRef.current.delete(expectedCreature))
+    })
+  }, [connection, creatures, ensureCreature, rooms])
 
   useEffect(() => {
     const openQuestComposer = (event: KeyboardEvent) => {
@@ -316,13 +466,51 @@ function App() {
     setQuestError(null)
     setLastQuest({ text: cleanQuest, target: questTarget })
     try {
-      const targetRoom = rooms.find((room) => room.id === questTarget)
-      const targetLead = targetRoom?.members.find((member) => member.level === 'pm')
-      const backendTarget = questTarget === 'all'
-        ? 'all'
-        : targetLead?.backendCreature ?? (creatures.includes(questTarget) ? questTarget : null)
+      let backendTarget: string | null = null
+      let backendSupporters: string[] = []
+      if (questTarget === 'all') {
+        backendTarget = 'all'
+      } else if (questTarget.startsWith('agent:')) {
+        const requestedCreature = questTarget.slice('agent:'.length)
+        const targetMember = rooms
+          .flatMap((room) => room.members)
+          .find((member) => member.backendCreature === requestedCreature)
+        if (!targetMember?.backendCreature) {
+          throw new Error('That room agent is no longer assigned. Choose another target.')
+        }
+        backendTarget = creatures.includes(targetMember.backendCreature)
+          ? targetMember.backendCreature
+          : await ensureCreature(
+            targetMember.name,
+            targetMember.instructions ?? targetMember.role,
+          )
+      } else {
+        const targetRoom = rooms.find((room) => room.id === questTarget)
+        const targetLead = targetRoom?.members.find((member) => member.level === 'pm')
+        if (targetLead?.backendCreature) {
+          backendTarget = creatures.includes(targetLead.backendCreature)
+            ? targetLead.backendCreature
+            : await ensureCreature(
+              targetLead.name,
+              targetLead.instructions ?? targetLead.role,
+            )
+        } else if (creatures.includes(questTarget)) {
+          backendTarget = questTarget
+        }
+        if (targetRoom) {
+          const supportMembers = targetRoom.members.filter((member) => (
+            member.level === 'subagent' && member.backendCreature
+          ))
+          backendSupporters = await Promise.all(supportMembers.map(async (member) => (
+            creatures.includes(member.backendCreature!)
+              ? member.backendCreature!
+              : ensureCreature(member.name, member.instructions ?? member.role)
+          )))
+          backendSupporters = [...new Set(backendSupporters)].filter((name) => name !== backendTarget)
+        }
+      }
       if (!backendTarget) throw new Error('This department needs a PM connected to the backend before it can receive quests.')
-      await giveQuest(cleanQuest, backendTarget)
+      await giveQuest(cleanQuest, backendTarget, backendSupporters)
       setQuestText('')
     } catch (cause) {
       setQuestError(cause instanceof Error ? cause.message : 'Could not dispatch quest')
@@ -331,18 +519,59 @@ function App() {
     }
   }
 
+  const runSelectedRoom = async () => {
+    if (!selectedCreature) return
+    const supportMembers = selectedRoom.members.filter((member) => (
+      member.level === 'subagent' && member.backendCreature
+    ))
+    try {
+      const supporters = await Promise.all(supportMembers.map(async (member) => (
+        creatures.includes(member.backendCreature!)
+          ? member.backendCreature!
+          : ensureCreature(member.name, member.instructions ?? member.role)
+      )))
+      await giveQuest(
+        selectedRoom.task,
+        selectedCreature,
+        [...new Set(supporters)].filter((name) => name !== selectedCreature),
+      )
+    } catch {
+      // The agent hook exposes the specific runtime error in the system message area.
+    }
+  }
+
   const submitSpawn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     try {
       const data = JSON.parse(spawnData) as Record<string, unknown>
-      const creature = await spawn(spawnName, spawnInstructions, data, spawnRunNow)
+      const assignedRoom = rooms.find((room) => room.id === spawnRoomId)
+      const cleanMission = spawnInstructions.trim()
+      const runtimeInstructions = spawnLevel === 'subagent'
+        ? (
+          `ROOM SUPPORT ROLE\nYou are a supporting subagent in the ${assignedRoom?.room ?? 'assigned'} room. `
+          + 'You report to the current room PM. Work only on delegated specialist workstreams, '
+          + 'return evidence and risks to the PM, and let the PM own the final room recommendation. '
+          + `Your specialty mission: ${cleanMission}`
+        )
+        : (
+          `ROOM PM ROLE\nYou lead the ${assignedRoom?.room ?? 'assigned'} room. Delegate specialist research `
+          + 'to the room subagents, evaluate their evidence, resolve conflicts, and own the final room recommendation. '
+          + `Your leadership mission: ${cleanMission}`
+        )
+      const creature = await spawn(
+        spawnName,
+        runtimeInstructions,
+        data,
+        spawnRunNow && spawnLevel === 'pm',
+      )
       const member: RoomMember = {
         id: `${creature}-${crypto.randomUUID().slice(0, 8)}`,
         name: spawnName.trim(),
-        role: spawnInstructions.trim().split(/[.!?]/)[0] || 'Startup agent',
+        role: cleanMission.split(/[.!?]/)[0] || 'Startup agent',
         kind: spawnKind,
         level: spawnLevel,
         backendCreature: creature,
+        instructions: runtimeInstructions,
       }
       setRooms((current) => current.map((room) => {
         if (room.id !== spawnRoomId) return room
@@ -390,6 +619,42 @@ function App() {
     window.requestAnimationFrame(() => handleFocusRoom(room))
   }
 
+  const openRefineComposer = (alert: CreatureAlert) => {
+    setInboxRoomId(null)
+    setRefineTarget(alert)
+    setRefinePrompt('')
+    setRefineError(null)
+  }
+
+  const closeRefineComposer = () => {
+    setRefineTarget(null)
+    setRefinePrompt('')
+    setRefineError(null)
+  }
+
+  const submitRefine = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!refineTarget) return
+
+    const cleanPrompt = refinePrompt.trim()
+    if (!cleanPrompt) {
+      setRefineError('Tell the agent what you want it to investigate further.')
+      return
+    }
+
+    setRefinePending(true)
+    setRefineError(null)
+    try {
+      await refine(refineTarget.creature, cleanPrompt)
+      setRefineTarget(null)
+      setRefinePrompt('')
+    } catch (cause) {
+      setRefineError(cause instanceof Error ? cause.message : 'Could not dig deeper')
+    } finally {
+      setRefinePending(false)
+    }
+  }
+
   const confirmDelete = () => {
     if (!deleteTarget) return
     if (deleteTarget.kind === 'room') {
@@ -422,7 +687,6 @@ function App() {
 
   return (
     <main className="game-shell" style={roomStyle}>
-      <div className="world-pixels" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
       <div
         ref={viewportRef}
         className={`office-viewport ${isPanning ? 'is-panning' : ''}`}
@@ -436,6 +700,9 @@ function App() {
           rooms={rooms}
           selectedRoomId={selectedRoomId}
           agentStates={states}
+          activities={activities}
+          collaboration={collaboration}
+          unreadByRoom={unreadByRoom}
           onSelectRoom={(room) => {
             if (!suppressRoomClickRef.current) handleFocusRoom(room)
           }}
@@ -447,11 +714,10 @@ function App() {
       </div>
 
       <div className="zoom-hud pixel-panel" aria-label="Office zoom controls">
-        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(zoom - 0.2)}>−</button>
-        <button className="zoom-readout" type="button" onClick={() => zoomAt(1)}>{Math.round(zoom * 100)}%</button>
-        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(zoom + 0.2)}>+</button>
+        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(zoom - fitZoom * 0.2)}>−</button>
+        <button className="zoom-readout" type="button" onClick={() => zoomAt(fitZoom)}>{Math.round((zoom / fitZoom) * 100)}%</button>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(zoom + fitZoom * 0.2)}>+</button>
         <button className="zoom-fit" type="button" onClick={fitOffice}>FIT</button>
-        <span className="pan-hint">DRAG TO PAN · SCROLL TO ZOOM</span>
       </div>
 
       <header className="game-topbar">
@@ -464,6 +730,7 @@ function App() {
           <div><small>AGENTS</small><strong>{String(totalAgents).padStart(2, '0')}</strong></div>
           <div title={`${usage.inputTokens.toLocaleString()} input · ${usage.outputTokens.toLocaleString()} output`}><small>TOKENS</small><strong>{usage.totalTokens >= 1000 ? `${(usage.totalTokens / 1000).toFixed(1)}K` : usage.totalTokens}</strong></div>
           <div title={usage.model ? `${usage.model} standard token pricing${usage.cachedInputTokens ? ` · ${usage.cachedInputTokens.toLocaleString()} cached` : ''}` : 'No API runs yet'}><small>EST. SPEND</small><strong>{usage.pricingAvailable ? `$${usage.estimatedCostUsd.toFixed(3)}` : 'N/A'}</strong></div>
+          <button className={totalUnread ? 'has-unread' : ''} type="button" onClick={() => openRoomInbox(ALL_ROOMS_INBOX)}><small>INBOX</small><strong>{totalUnread}</strong></button>
         </div>
       </header>
 
@@ -474,18 +741,28 @@ function App() {
           const leadCreature = room.members.find((member) => member.level === 'pm')?.backendCreature
           const agentState = states[leadCreature ?? room.id]
           const status = agentState ? stateLabels[agentState] : room.status
+          const unreadCount = unreadByRoom[room.id] ?? 0
           return (
-            <button
-              className={`agent-card state-${agentState ?? 'local'} ${selectedRoomId === room.id ? 'is-active' : ''}`}
-              key={room.id}
-              onClick={() => handleFocusRoom(room)}
-              style={{ '--agent-color': room.color, '--agent-soft': room.softColor } as CSSProperties}
-              type="button"
-            >
-              <span className="agent-icon">{roomIcon(room)}</span>
-              <span className="agent-copy"><strong>{room.room}</strong><small>{room.agent} · {status}</small></span>
-              <span className="agent-online" />
-            </button>
+            <div className={`room-nav-entry ${unreadCount > 0 ? 'has-unread' : ''}`} key={room.id}>
+              <button
+                className={`agent-card state-${agentState ?? 'local'} ${selectedRoomId === room.id ? 'is-active' : ''}`}
+                onClick={() => handleFocusRoom(room)}
+                style={{ '--agent-color': room.color, '--agent-soft': room.softColor } as CSSProperties}
+                type="button"
+              >
+                <span className="agent-icon">{roomIcon(room)}</span>
+                <span className="agent-copy"><strong>{room.room}</strong><small>{status}</small></span>
+                <span className="agent-online" />
+              </button>
+              <button
+                className="room-inbox-shortcut"
+                type="button"
+                aria-label={`Open ${room.room} inbox${unreadCount ? `, ${unreadCount} unread` : ''}`}
+                onClick={() => openRoomInbox(room.id)}
+              >
+                <span>✉ INBOX</span><b>{unreadCount || (alertsByRoom[room.id]?.length ?? 0)}</b>
+              </button>
+            </div>
           )
         })}
         </div>
@@ -505,6 +782,10 @@ function App() {
           <div><h2>{selectedRoom.agent}</h2><p>{selectedRoom.room}</p></div>
         </div>
         <div className="mission-role">{selectedRoom.role}</div>
+        <button className={`mission-inbox-button ${unreadByRoom[selectedRoom.id] ? 'has-unread' : ''}`} type="button" onClick={() => openRoomInbox(selectedRoom.id)}>
+          <span><i>✉</i> ROOM INBOX<small>{alertsByRoom[selectedRoom.id]?.length ?? 0} saved findings</small></span>
+          <b>{unreadByRoom[selectedRoom.id] ? `${unreadByRoom[selectedRoom.id]} NEW` : 'OPEN'}</b>
+        </button>
         <div className="mission-card">
           <small>CURRENT QUEST</small>
           <strong>{selectedQuest}</strong>
@@ -564,9 +845,13 @@ function App() {
                 <div className="roster-actions">
                   {runtimeAvailable && member.backendCreature && (
                     <button type="button" onClick={() => {
-                      setQuestTarget(selectedRoom.id)
+                      setQuestTarget(
+                        member.level === 'pm'
+                          ? selectedRoom.id
+                          : `agent:${member.backendCreature}`,
+                      )
                       commandInputRef.current?.focus()
-                    }}>ASSIGN</button>
+                    }}>{member.level === 'pm' ? 'ASSIGN ROOM' : 'ASSIGN DIRECT'}</button>
                   )}
                   <button className="remove-member" type="button" aria-label={`Remove ${member.name}`} onClick={() => setDeleteTarget({ kind: 'member', roomId: selectedRoom.id, memberId: member.id, label: member.name })}>×</button>
                 </div>
@@ -581,7 +866,7 @@ function App() {
           className="enter-room-button"
           type="button"
           disabled={!canRunSelected}
-          onClick={() => selectedCreature && void hunt(selectedCreature)}
+          onClick={() => void runSelectedRoom()}
         >
           {selectedState === 'hunting' ? 'HUNTING…' : selectedCreature ? `RELEASE ${selectedRoom.agent.toUpperCase()}` : 'RECRUIT A PM TO RUN'}
           <span>▶</span>
@@ -595,53 +880,149 @@ function App() {
         {error && <div className="runtime-error pixel-panel" role="alert">{error}</div>}
       </div>
 
-      <section
-        className={`alert-stack ${alerts.some(isLongAlert) ? 'has-long-output' : ''}`}
-        aria-label="Agent alerts"
-        aria-live="polite"
-      >
-        {reports.slice(0, 1).map((report) => (
-          <article className="report-card pixel-panel" key={`${report.task}-${report.summary}`}>
-            <header><b>TASK REPORT</b><span>{report.findings.length} WORKER FINDINGS</span></header>
-            <h2>{report.task}</h2>
-            <p>{report.summary}</p>
-            {report.recommendations.length > 0 && (
-              <ul>
-                {report.recommendations.slice(0, 3).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
-              </ul>
-            )}
-          </article>
-        ))}
-        {alerts.map((alert) => (
-          <article
-            className={`alert-card pixel-panel ${isLongAlert(alert) ? 'is-expanded' : ''}`}
-            key={alert.id}
+      {reports.slice(0, 1).map((report) => (
+        <article className="report-card pixel-panel" key={`${report.task}-${report.summary}`}>
+          <header><b>TASK REPORT</b><span>{report.findings.length} WORKER FINDINGS</span></header>
+          <h2>{report.task}</h2>
+          <p>{report.summary}</p>
+          {report.recommendations.length > 0 && (
+            <ul>
+              {report.recommendations.slice(0, 3).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+            </ul>
+          )}
+        </article>
+      ))}
+      {latestUnreadEntry && !inboxRoomId && (
+        <button
+          className="inbox-toast pixel-panel"
+          type="button"
+          aria-live="polite"
+          onClick={() => openRoomInbox(latestUnreadEntry.roomId, latestUnreadEntry.alert.id)}
+        >
+          <span className="inbox-toast-icon">✉</span>
+          <span><small>NEW FINDING · {rooms.find((room) => room.id === latestUnreadEntry.roomId)?.room}</small><strong>{latestUnreadEntry.alert.headline}</strong></span>
+          <b>OPEN INBOX</b>
+        </button>
+      )}
+
+      {inboxRoomId && (
+        <div className="modal-backdrop inbox-backdrop" role="presentation" onMouseDown={() => setInboxRoomId(null)}>
+          <section className="room-inbox pixel-panel" role="dialog" aria-modal="true" aria-labelledby="inbox-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="inbox-header">
+              <div>
+                <span className="inbox-header-icon">✉</span>
+                <span><small>{inboxShowsAllRooms ? 'COMPANY MAIL' : 'DEPARTMENT MAIL'}</small><h2 id="inbox-title">{inboxShowsAllRooms ? 'All Rooms Inbox' : `${inboxRoom?.room ?? 'Room'} Inbox`}</h2></span>
+              </div>
+              <div className="inbox-header-actions">
+                <select aria-label="Inbox scope" value={inboxRoomId} onChange={(event) => openRoomInbox(event.target.value)}>
+                  <option value={ALL_ROOMS_INBOX}>ALL ROOMS · {totalUnread} NEW</option>
+                  {rooms.map((room) => <option key={room.id} value={room.id}>{room.room.toUpperCase()} · {unreadByRoom[room.id] ?? 0} NEW</option>)}
+                </select>
+                <button type="button" disabled={inboxAlerts.length === 0} onClick={markInboxRead}>MARK ALL READ</button>
+                <button className="inbox-close" type="button" aria-label="Close room inbox" onClick={() => setInboxRoomId(null)}>×</button>
+              </div>
+            </header>
+
+            <div className="inbox-layout">
+              <nav className="inbox-message-list" aria-label={`${inboxShowsAllRooms ? 'All rooms' : inboxRoom?.room ?? 'Room'} messages`}>
+                <div className="inbox-list-summary"><span>{inboxAlerts.length} FINDINGS</span><b>{inboxUnreadCount} UNREAD</b></div>
+                {inboxAlerts.length === 0 ? (
+                  <div className="inbox-empty-list"><i>✉</i><strong>ALL CLEAR</strong><small>New agent findings will arrive here.</small></div>
+                ) : inboxAlerts.map((alert) => {
+                  const unread = !readAlertIds.has(alert.id)
+                  const alertRoom = rooms.find((room) => room.id === roomIdForCreature(rooms, alert.creature))
+                  return (
+                    <button
+                      className={`inbox-message ${activeInboxAlertId === alert.id ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`}
+                      key={alert.id}
+                      style={alertRoom ? { '--room-color': alertRoom.color } as CSSProperties : undefined}
+                      type="button"
+                      onClick={() => selectInboxAlert(alert.id)}
+                    >
+                      <span className="inbox-message-meta"><b>{inboxShowsAllRooms && alertRoom ? `${alertRoom.room} · ${alert.creature}` : alert.creature}</b><time>{formatInboxTime(alert.createdAt)}</time></span>
+                      <strong>{alert.headline}</strong>
+                      <small>{alert.phase === 'synthesis' ? 'PARTY SYNTHESIS' : alert.impact}</small>
+                      {unread && <i aria-label="Unread" />}
+                    </button>
+                  )
+                })}
+              </nav>
+
+              <article className="inbox-reader" style={activeInboxRoom ? {
+                '--room-color': activeInboxRoom.color,
+                '--room-dark': activeInboxRoom.darkColor,
+              } as CSSProperties : undefined}>
+                {activeInboxAlert ? (
+                  <>
+                    <header className="inbox-reader-header">
+                      <div><small>{activeInboxAlert.phase === 'synthesis' ? 'PARTY SYNTHESIS' : 'AGENT FINDING'} · {activeInboxRoom?.room.toUpperCase()} · {formatInboxTime(activeInboxAlert.createdAt)}</small><h3>{activeInboxAlert.headline}</h3></div>
+                      <span>{activeInboxAlert.creature.toUpperCase()}</span>
+                    </header>
+                    <div className="inbox-impact"><small>IMPACT</small><strong>{activeInboxAlert.impact}</strong></div>
+                    <section className="inbox-reading-section"><small>WHAT THE AGENT FOUND</small><p>{activeInboxAlert.details}</p></section>
+                    <section className="inbox-reading-section recommendation"><small>RECOMMENDED NEXT ACTION</small><strong>{activeInboxAlert.recommendation}</strong></section>
+                    {activeInboxAlert.sources.length > 0 && (
+                      <section className="inbox-reading-section"><small>SOURCES</small><ul className="inbox-sources">{activeInboxAlert.sources.map((source) => (
+                        <li key={source}>{safeSourceUrl(source) ? <a href={safeSourceUrl(source)!} target="_blank" rel="noreferrer">{source}</a> : <span>{source}</span>}</li>
+                      ))}</ul></section>
+                    )}
+                    <footer className="inbox-reader-actions">
+                      <button type="button" onClick={() => removeInboxAlert(activeInboxAlert.id)}>DELETE MESSAGE</button>
+                      <button className="inbox-primary-action" type="button" onClick={() => openRefineComposer(activeInboxAlert)}>DIG DEEPER</button>
+                    </footer>
+                  </>
+                ) : (
+                  <div className="inbox-empty-reader"><i>✉</i><h3>No findings yet</h3><p>{inboxShowsAllRooms ? 'Run a quest for any room. Responses from the whole company will be saved here.' : `Run a quest for ${inboxRoom?.room ?? 'this room'}. Responses will be saved here instead of covering the office.`}</p></div>
+                )}
+              </article>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {refineTarget && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeRefineComposer}>
+          <section
+            className="spawn-modal refine-modal pixel-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="refine-title"
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <header>
-              <b>{alert.creature}</b>
-              <span>{alert.phase === 'synthesis' ? 'PARTY SYNTHESIS · ' : ''}{alert.impact}</span>
+              <span>FOLLOW-UP · {refineTarget.creature.toUpperCase()}</span>
+              <button type="button" aria-label="Close follow-up prompt" onClick={closeRefineComposer}>×</button>
             </header>
-            <h2>{alert.headline}</h2>
-            <p>{alert.details}</p>
-            <strong>{alert.recommendation}</strong>
-            {alert.sources.length > 0 && (
-              <ul className="alert-sources" aria-label="Research sources">
-                {alert.sources.map((source) => (
-                  <li key={source}>
-                    {safeSourceUrl(source) ? (
-                      <a href={safeSourceUrl(source)!} target="_blank" rel="noreferrer">{source}</a>
-                    ) : <span>{source}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <footer>
-              <button type="button" onClick={() => dismissAlert(alert.id)}>DISMISS</button>
-              <button type="button" onClick={() => void refine(alert.creature)}>DIG DEEPER</button>
-            </footer>
-          </article>
-        ))}
-      </section>
+            <h2 id="refine-title">DIG DEEPER</h2>
+            <div className="refine-context">
+              <small>ORIGINAL FINDING</small>
+              <strong>{refineTarget.headline}</strong>
+            </div>
+            <form onSubmit={(event) => void submitRefine(event)}>
+              <label>
+                WHAT SHOULD {refineTarget.creature.toUpperCase()} INVESTIGATE?
+                <textarea
+                  autoFocus
+                  placeholder="Example: Verify the assumptions, find current web evidence, and give me three concrete next steps."
+                  value={refinePrompt}
+                  onChange={(event) => setRefinePrompt(event.target.value)}
+                />
+              </label>
+              <p className="quest-help">The agent keeps its existing session context and will return a new alert based on your follow-up.</p>
+              {refineError && <p className="form-error" role="alert">{refineError}</p>}
+              <div className="modal-actions">
+                <button type="button" onClick={closeRefineComposer}>{refinePending ? 'CLOSE & KEEP WORKING' : 'CANCEL'}</button>
+                <button
+                  type="submit"
+                  disabled={refinePending || !refinePrompt.trim() || connection !== 'online' || !apiKeyConfigured}
+                >
+                  {refinePending ? 'INVESTIGATING…' : 'SEND FOLLOW-UP'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       {showAddRoom && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowAddRoom(false)}>
@@ -717,19 +1098,23 @@ function App() {
               </label>
               <label>MISSION<textarea value={spawnInstructions} onChange={(event) => setSpawnInstructions(event.target.value)} /></label>
               <label>STARTING DATA (JSON)<textarea value={spawnData} onChange={(event) => setSpawnData(event.target.value)} /></label>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={spawnRunNow}
-                  disabled={!apiKeyConfigured}
-                  onChange={(event) => setSpawnRunNow(event.target.checked)}
-                />
-                RUN THE FIRST HUNT AFTER RECRUITING
-              </label>
+              {spawnLevel === 'pm' ? (
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={spawnRunNow}
+                    disabled={!apiKeyConfigured}
+                    onChange={(event) => setSpawnRunNow(event.target.checked)}
+                  />
+                  RUN THE FIRST HUNT AFTER RECRUITING
+                </label>
+              ) : (
+                <p className="quest-help">SUB-AGENTS ACTIVATE WHEN THEIR ROOM PM RECEIVES A QUEST.</p>
+              )}
               {spawnError && <p className="form-error" role="alert">{spawnError}</p>}
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowSpawn(false)}>CANCEL</button>
-                <button type="submit" disabled={connection !== 'online'}>{spawnRunNow ? 'RECRUIT & HUNT' : 'RECRUIT AGENT'}</button>
+                <button type="submit" disabled={connection !== 'online'}>{spawnRunNow && spawnLevel === 'pm' ? 'RECRUIT & HUNT' : 'RECRUIT AGENT'}</button>
               </div>
             </form>
           </section>
@@ -752,19 +1137,33 @@ function App() {
 
       <form className="command-hud pixel-panel" onSubmit={(event) => void submitQuest(event)}>
         <div className="founder-avatar">S</div>
-        <select className="command-department" aria-label="Quest department" value={questTarget} onChange={(event) => {
-          setQuestTarget(event.target.value)
-          const room = rooms.find((candidate) => candidate.id === event.target.value)
+        <select className="command-department" aria-label="Quest target" value={questTarget} onChange={(event) => {
+          const target = event.target.value
+          const creatureTarget = target.startsWith('agent:') ? target.slice('agent:'.length) : null
+          const room = rooms.find((candidate) => (
+            candidate.id === target
+            || candidate.members.some((member) => member.backendCreature === creatureTarget)
+          ))
           if (room) handleFocusRoom(room)
+          setQuestTarget(target)
         }}>
           <option value="all">ALL DEPTS</option>
-          {rooms.map((room) => <option key={room.id} value={room.id}>{room.room.toUpperCase()}</option>)}
+          {rooms.map((room) => (
+            <optgroup key={room.id} label={room.room.toUpperCase()}>
+              <option value={room.id}>ROOM PM · {room.agent.toUpperCase()}</option>
+              {room.members.filter((member) => member.level === 'subagent' && member.backendCreature).map((member) => (
+                <option key={member.id} value={`agent:${member.backendCreature}`}>
+                  DIRECT SUB · {member.name.toUpperCase()}
+                </option>
+              ))}
+            </optgroup>
+          ))}
         </select>
         <input
           ref={commandInputRef}
           className="command-input"
           aria-label="Give agents a quest"
-          placeholder="Give this department a quest…"
+          placeholder="Give this room or agent a quest…"
           value={questText}
           onChange={(event) => setQuestText(event.target.value)}
         />
