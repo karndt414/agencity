@@ -1380,7 +1380,7 @@ p { margin: 0; }
   top: 88px;
   left: 16px;
   display: grid;
-  width: 230px;
+  width: 258px;
   gap: 6px;
   padding: 9px;
 }
@@ -1398,7 +1398,7 @@ p { margin: 0; }
   display: grid;
 }
 
-.room-nav-entry .agent-card { padding-right: 43px; }
+.room-nav-entry .agent-card { padding-right: 68px; }
 
 .room-inbox-shortcut {
   position: absolute;
@@ -1406,7 +1406,7 @@ p { margin: 0; }
   top: 6px;
   right: 5px;
   display: grid;
-  min-width: 35px;
+  width: 52px;
   height: 34px;
   place-content: center;
   gap: 2px;
@@ -1458,10 +1458,9 @@ p { margin: 0; }
   cursor: pointer;
 }
 
-.agent-card:hover { transform: translateX(2px); background: #f8e9c4; }
+.agent-card:hover { background: #f8e9c4; }
 
 .agent-card.is-active {
-  transform: translateX(5px);
   border-color: var(--agent-color);
   background: color-mix(in srgb, var(--agent-soft) 38%, #f9e9c1);
   box-shadow: -4px 0 var(--agent-color), 3px 3px 0 rgba(76, 53, 43, 0.22);
@@ -1499,6 +1498,7 @@ p { margin: 0; }
 .agent-online {
   width: 6px;
   height: 6px;
+  flex: 0 0 6px;
   background: #67915f;
   animation: online-blink 1.4s steps(2) infinite;
 }
@@ -2587,7 +2587,7 @@ p { margin: 0; }
 
 @media (max-width: 1080px) {
   .office-viewport { inset: 0; }
-  .agent-hud { width: 210px; }
+  .agent-hud { width: 230px; }
   .mission-hud { width: 232px; }
   .agent-copy small { display: none; }
   .resource-hud > div { min-width: 65px; }
