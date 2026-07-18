@@ -40,6 +40,7 @@ const kindIcons: Record<AgentKind, string> = {
 }
 
 const ROOM_STORAGE_KEY = 'agencity.rooms.v2'
+const defaultRoomNames = new Map(ROOMS.map((room) => [room.id, room.room]))
 
 function initialRooms(): RoomData[] {
   try {
@@ -47,7 +48,11 @@ function initialRooms(): RoomData[] {
     if (!saved) return ROOMS
     const parsed = JSON.parse(saved) as RoomData[]
     if (!Array.isArray(parsed) || parsed.length === 0) return ROOMS
-    return parsed.map((room) => ({ ...room, members: room.members ?? [] }))
+    return parsed.map((room) => ({
+      ...room,
+      room: defaultRoomNames.get(room.id) ?? room.room,
+      members: room.members ?? [],
+    }))
   } catch {
     return ROOMS
   }
