@@ -116,6 +116,7 @@ function App() {
   const [rooms, setRooms] = useState<RoomData[]>(initialRooms)
   const [selectedRoomId, setSelectedRoomId] = useState('patch')
   const [zoom, setZoom] = useState(1)
+  const [fitZoom, setFitZoom] = useState(1)
   const [camera, setCamera] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -234,7 +235,10 @@ function App() {
     if (!viewport) return
     const officeHeight = getOfficeHeight(rooms.length)
     const officeWidth = 1180
-    const nextZoom = 1
+    const nextZoom = Math.min(1, Math.max(0.45,
+      Math.min((viewport.clientHeight - 20) / officeHeight, (viewport.clientWidth - 20) / officeWidth),
+    ))
+    setFitZoom(nextZoom)
     setZoom(nextZoom)
     setCamera({
       x: (viewport.clientWidth - officeWidth * nextZoom) / 2,
@@ -491,9 +495,9 @@ function App() {
       </div>
 
       <div className="zoom-hud pixel-panel" aria-label="Office zoom controls">
-        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(zoom - 0.2)}>−</button>
-        <button className="zoom-readout" type="button" onClick={() => zoomAt(1)}>{Math.round(zoom * 100)}%</button>
-        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(zoom + 0.2)}>+</button>
+        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(zoom - fitZoom * 0.2)}>−</button>
+        <button className="zoom-readout" type="button" onClick={() => zoomAt(fitZoom)}>{Math.round((zoom / fitZoom) * 100)}%</button>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(zoom + fitZoom * 0.2)}>+</button>
         <button className="zoom-fit" type="button" onClick={fitOffice}>FIT</button>
       </div>
 
