@@ -6,9 +6,11 @@ from typing import Any
 import agents
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .alert_pipeline import CreatureAlert
+from .artifacts import read_artifact
 from .config import has_openai_api_key
 from .creature_manager import (
     collaborate_on_quest,
@@ -95,6 +97,28 @@ async def health() -> dict[str, Any]:
 @app.get("/api/creatures")
 async def list_creatures() -> dict[str, list[str]]:
     return {"creatures": sorted(CREATURES)}
+
+
+@app.get("/api/artifacts/{artifact_id}")
+async def artifact_endpoint(artifact_id: str, download: bool = False) -> Response:
+    try:
+        path, content = read_artifact(artifact_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Artifact not found") from exc
+
+    headers = {
+        "Content-Security-Policy": (
+            "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+            "style-src 'unsafe-inline'; img-src data:; font-src data:; "
+            "connect-src 'none'; form-action 'none'; base-uri 'none'"
+        ),
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
+        return Response(content=content, media_type="text/html", headers=headers)
+    return HTMLResponse(content=content, headers=headers)
 
 
 @app.post("/api/creatures/release-all")

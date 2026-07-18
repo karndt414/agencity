@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from agents import Runner
 
 from .alert_pipeline import CreatureAlert, parse_alert
+from .artifacts import materialize_artifact
 from .creatures import CREATURES, get_creature, get_session, normalize_name
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -180,6 +181,8 @@ async def _run(
             model = agent.model if isinstance(agent.model, str) else str(agent.model)
             await _emit(sink, _usage_message(key, model, result.context_wrapper.usage))
             alert = parse_alert(result.final_output)
+            if publish_alert:
+                alert = materialize_artifact(alert)
         except Exception as exc:
             await _emit(sink, {"type": "error", "creature": key, "error": str(exc)})
             raise
@@ -226,7 +229,9 @@ async def refine_hunt(
             f"{follow_up.strip()}\n\n"
             "Search the live public web before answering. Treat any internal claims in "
             "session memory as unverified unless the founder explicitly supplied them, "
-            "and preserve exact supporting URLs in `sources`."
+            "and preserve exact supporting URLs in `sources`. If the follow-up asks you "
+            "to create, revise, or fix code, return the complete revised self-contained "
+            "HTML implementation in `artifact`, not merely instructions or a patch."
         ),
         sink,
         phase="refine",
@@ -250,7 +255,9 @@ async def direct_creature(
         f"{clean_quest}\n\n"
         "Search the live public web first. Complete this quest using your specialty, "
         "cite exact URLs, and return the most actionable structured alert supported by "
-        "current public evidence.\n\n"
+        "current public evidence. If the quest asks you to code, build, or prototype, "
+        "the deliverable must be a working self-contained HTML file in `artifact`; do "
+        "not substitute a plan, code excerpt, or prose-only answer.\n\n"
         f"{_internal_context(data)}"
     )
     return await _run(name, input_text, sink, phase="quest")
@@ -384,7 +391,9 @@ async def coordinate_room_quest(
         "specialist research below. Evaluate their evidence, resolve conflicts, fill any "
         "material gaps with live public web research, and publish one clear room-level "
         "answer. Preserve exact supporting URLs, distinguish fact from inference, and "
-        "take responsibility for the final prioritization.\n\n"
+        "take responsibility for the final prioritization. If the founder requested a "
+        "code deliverable, you must publish the complete working self-contained HTML in "
+        "your final `artifact`; supporting reports alone are not completion.\n\n"
         f"SUPPORTING REPORTS\n{json.dumps(support_reports, ensure_ascii=False, indent=2)}\n\n"
         f"{_internal_context(data_by_creature.get(pm, {}))}"
     )
@@ -484,6 +493,8 @@ async def collaborate_on_quest(
         "the most important claims before synthesizing. Preserve exact supporting URLs "
         "in the `sources` field. Treat peer claims without public URLs as unverified. "
         "You may use a handoff if a material gap remains.\n\n"
+        "If the founder requested code, the coordinator must return the complete working "
+        "self-contained HTML file in the final `artifact`, not a plan or excerpt.\n\n"
         f"PEER REPORTS\n{json.dumps(peer_reports, ensure_ascii=False, indent=2)}"
     )
     try:

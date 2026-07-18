@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+class CreatureArtifact(BaseModel):
+    """A generated code artifact before or after backend persistence."""
+
+    filename: str = Field(min_length=1, max_length=128)
+    media_type: Literal["text/html"] = "text/html"
+    content: str | None = Field(default=None, max_length=750_000)
+    url: str | None = None
 
 
 class CreatureAlert(BaseModel):
@@ -14,6 +23,7 @@ class CreatureAlert(BaseModel):
     impact: str
     recommendation: str
     sources: list[str] = Field(default_factory=list)
+    artifact: CreatureArtifact | None = None
 
 
 def _decode_json(value: str) -> Any:

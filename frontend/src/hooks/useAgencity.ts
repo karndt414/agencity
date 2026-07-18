@@ -37,6 +37,11 @@ export type CreatureAlert = {
   impact: string
   recommendation: string
   sources: string[]
+  artifact?: {
+    filename: string
+    media_type: 'text/html'
+    url?: string | null
+  } | null
   phase?: string
 }
 

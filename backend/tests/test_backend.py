@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 from agents import WebSearchTool
 
 import backend.creature_manager as creature_manager
+import backend.artifacts as artifact_module
 import backend.spawn as spawn_module
-from backend.alert_pipeline import CreatureAlert, parse_alert
+from backend.alert_pipeline import CreatureAlert, CreatureArtifact, parse_alert
 from backend.creatures import CREATURES
 from backend.creature_manager import _internal_context, _usage_message, select_quest_coordinator
 from backend.main import app
@@ -53,6 +54,50 @@ def test_alert_pipeline_accepts_structured_json() -> None:
     )
     assert isinstance(alert, CreatureAlert)
     assert alert.headline == "Unused SaaS"
+
+
+def test_generated_html_is_persisted_previewed_and_downloadable(monkeypatch, tmp_path) -> None:
+    artifact_directory = tmp_path / "artifacts"
+    monkeypatch.setattr(artifact_module, "ARTIFACTS_DIR", artifact_directory)
+    source = "<!doctype html><html><body><h1>Working prototype</h1></body></html>"
+    alert = CreatureAlert(
+        headline="Prototype complete",
+        details="Created the requested page.",
+        impact="Ready to review",
+        recommendation="Open the generated file",
+        artifact=CreatureArtifact(
+            filename="../../Launch Page.html",
+            content=source,
+        ),
+    )
+
+    public_alert = artifact_module.materialize_artifact(alert)
+
+    assert public_alert.artifact is not None
+    assert public_alert.artifact.filename == "launch-page.html"
+    assert public_alert.artifact.content is None
+    assert public_alert.artifact.url is not None
+    files = list(artifact_directory.iterdir())
+    assert len(files) == 1
+    assert files[0].parent == artifact_directory
+    assert files[0].read_text(encoding="utf-8") == source
+
+    client = TestClient(app)
+    preview = client.get(public_alert.artifact.url)
+    download = client.get(f"{public_alert.artifact.url}?download=true")
+
+    assert preview.status_code == 200
+    assert "Working prototype" in preview.text
+    assert "sandbox allow-scripts" in preview.headers["content-security-policy"]
+    assert "connect-src 'none'" in preview.headers["content-security-policy"]
+    assert preview.headers["x-content-type-options"] == "nosniff"
+    assert download.status_code == 200
+    assert download.headers["content-disposition"].startswith("attachment;")
+
+
+def test_artifact_route_rejects_path_traversal() -> None:
+    response = TestClient(app).get("/api/artifacts/not-a-valid-artifact.html")
+    assert response.status_code == 404
 
 
 def test_quest_dispatches_to_existing_creature(monkeypatch) -> None:
