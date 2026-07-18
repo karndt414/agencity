@@ -92,7 +92,8 @@ button {
   cursor: grabbing !important;
 }
 
-.office-viewport.is-panning .pixel-office {
+.office-viewport.is-panning .pixel-office,
+.office-viewport.is-navigating .pixel-office {
   transition: none;
 }
 
