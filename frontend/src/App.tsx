@@ -86,12 +86,19 @@ function safeSourceUrl(source: string): string | null {
   }
 }
 
-function isLongAlert(alert: {
-  details: string
-  recommendation: string
-  sources: string[]
-}): boolean {
-  return alert.details.length + alert.recommendation.length > 420 || alert.sources.length > 3
+function roomIdForCreature(rooms: RoomData[], creature: string): string | null {
+  const room = rooms.find((candidate) => (
+    candidate.id === creature
+    || candidate.members.some((member) => member.backendCreature === creature)
+  ))
+  return room?.id ?? null
+}
+
+function formatInboxTime(createdAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(createdAt)
 }
 
 function App() {
@@ -146,6 +153,9 @@ function App() {
   const [refinePrompt, setRefinePrompt] = useState('')
   const [refineError, setRefineError] = useState<string | null>(null)
   const [refinePending, setRefinePending] = useState(false)
+  const [inboxRoomId, setInboxRoomId] = useState<string | null>(null)
+  const [activeInboxAlertId, setActiveInboxAlertId] = useState<string | null>(null)
+  const [readAlertIds, setReadAlertIds] = useState<Set<string>>(() => new Set())
   const [deleteTarget, setDeleteTarget] = useState<{
     kind: 'room' | 'member'
     roomId: string
@@ -185,6 +195,33 @@ function App() {
   const selectedSupportingMembers = selectedRoomIsWorking
     ? selectedRoom.members.filter((member) => member.level === 'subagent' && !member.backendCreature)
     : []
+  const alertsByRoom = useMemo(() => {
+    const grouped = Object.fromEntries(rooms.map((room) => [room.id, [] as CreatureAlert[]]))
+    alerts.forEach((alert) => {
+      const roomId = roomIdForCreature(rooms, alert.creature)
+      if (roomId) grouped[roomId]?.push(alert)
+    })
+    return grouped
+  }, [alerts, rooms])
+  const unreadByRoom = useMemo(() => Object.fromEntries(rooms.map((room) => [
+    room.id,
+    (alertsByRoom[room.id] ?? []).filter((alert) => !readAlertIds.has(alert.id)).length,
+  ])), [alertsByRoom, readAlertIds, rooms])
+  const totalUnread = Object.values(unreadByRoom).reduce((total, count) => total + count, 0)
+  const inboxRoom = rooms.find((room) => room.id === inboxRoomId) ?? null
+  const inboxAlerts = useMemo(
+    () => inboxRoomId ? alertsByRoom[inboxRoomId] ?? [] : [],
+    [alertsByRoom, inboxRoomId],
+  )
+  const activeInboxAlert = inboxAlerts.find((alert) => alert.id === activeInboxAlertId) ?? null
+  const latestUnreadEntry = useMemo(() => {
+    for (const alert of alerts) {
+      if (readAlertIds.has(alert.id)) continue
+      const roomId = roomIdForCreature(rooms, alert.creature)
+      if (roomId) return { alert, roomId }
+    }
+    return null
+  }, [alerts, readAlertIds, rooms])
 
   const roomStyle = {
     '--room-color': selectedRoom.color,
@@ -194,6 +231,52 @@ function App() {
   } as CSSProperties
 
   const totalAgents = rooms.reduce((sum, room) => sum + room.members.length, 0)
+
+  const markAlertRead = useCallback((alertId: string) => {
+    setReadAlertIds((current) => {
+      if (current.has(alertId)) return current
+      return new Set([...current, alertId])
+    })
+  }, [])
+
+  const openRoomInbox = (roomId: string, preferredAlertId?: string) => {
+    const roomAlerts = alertsByRoom[roomId] ?? []
+    const nextAlert = roomAlerts.find((alert) => alert.id === preferredAlertId)
+      ?? roomAlerts.find((alert) => !readAlertIds.has(alert.id))
+      ?? roomAlerts[0]
+    setSelectedRoomId(roomId)
+    setQuestTarget(roomId)
+    setInboxRoomId(roomId)
+    setActiveInboxAlertId(nextAlert?.id ?? null)
+    if (nextAlert) markAlertRead(nextAlert.id)
+  }
+
+  const selectInboxAlert = (alertId: string) => {
+    setActiveInboxAlertId(alertId)
+    markAlertRead(alertId)
+  }
+
+  const markRoomInboxRead = () => {
+    setReadAlertIds((current) => new Set([
+      ...current,
+      ...inboxAlerts.map((alert) => alert.id),
+    ]))
+  }
+
+  const removeInboxAlert = (alertId: string) => {
+    const remaining = inboxAlerts.filter((alert) => alert.id !== alertId)
+    dismissAlert(alertId)
+    const nextAlert = remaining[0]
+    setActiveInboxAlertId(nextAlert?.id ?? null)
+    if (nextAlert) markAlertRead(nextAlert.id)
+  }
+
+  useEffect(() => {
+    if (!inboxRoomId || activeInboxAlertId || inboxAlerts.length === 0) return
+    const nextAlert = inboxAlerts.find((alert) => !readAlertIds.has(alert.id)) ?? inboxAlerts[0]
+    setActiveInboxAlertId(nextAlert.id)
+    markAlertRead(nextAlert.id)
+  }, [activeInboxAlertId, inboxAlerts, inboxRoomId, markAlertRead, readAlertIds])
 
   const handleSelectRoom = (room: RoomData) => {
     setSelectedRoomId(room.id)
@@ -265,15 +348,18 @@ function App() {
 
   const handlePanStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
-    event.currentTarget.setPointerCapture(event.pointerId)
     panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, cameraX: camera.x, cameraY: camera.y, moved: false }
-    setIsPanning(true)
   }
 
   const handlePanMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = panRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
-    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 5) drag.moved = true
+    if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 5) {
+      drag.moved = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setIsPanning(true)
+    }
+    if (!drag.moved) return
     setCamera({ x: drag.cameraX + event.clientX - drag.x, y: drag.cameraY + event.clientY - drag.y })
   }
 
@@ -401,6 +487,7 @@ function App() {
   }
 
   const openRefineComposer = (alert: CreatureAlert) => {
+    setInboxRoomId(null)
     setRefineTarget(alert)
     setRefinePrompt('')
     setRefineError(null)
@@ -482,6 +569,7 @@ function App() {
           agentStates={states}
           activities={activities}
           collaboration={collaboration}
+          unreadByRoom={unreadByRoom}
           onSelectRoom={(room) => {
             if (!suppressRoomClickRef.current) handleFocusRoom(room)
           }}
@@ -510,6 +598,7 @@ function App() {
           <div><small>AGENTS</small><strong>{String(totalAgents).padStart(2, '0')}</strong></div>
           <div title={`${usage.inputTokens.toLocaleString()} input · ${usage.outputTokens.toLocaleString()} output`}><small>TOKENS</small><strong>{usage.totalTokens >= 1000 ? `${(usage.totalTokens / 1000).toFixed(1)}K` : usage.totalTokens}</strong></div>
           <div title={usage.model ? `${usage.model} standard token pricing${usage.cachedInputTokens ? ` · ${usage.cachedInputTokens.toLocaleString()} cached` : ''}` : 'No API runs yet'}><small>EST. SPEND</small><strong>{usage.pricingAvailable ? `$${usage.estimatedCostUsd.toFixed(3)}` : 'N/A'}</strong></div>
+          <button className={totalUnread ? 'has-unread' : ''} type="button" onClick={() => openRoomInbox(latestUnreadEntry?.roomId ?? selectedRoom.id)}><small>INBOX</small><strong>{totalUnread}</strong></button>
         </div>
       </header>
 
@@ -520,18 +609,28 @@ function App() {
           const leadCreature = room.members.find((member) => member.level === 'pm')?.backendCreature
           const agentState = states[leadCreature ?? room.id]
           const status = agentState ? stateLabels[agentState] : room.status
+          const unreadCount = unreadByRoom[room.id] ?? 0
           return (
-            <button
-              className={`agent-card state-${agentState ?? 'local'} ${selectedRoomId === room.id ? 'is-active' : ''}`}
-              key={room.id}
-              onClick={() => handleFocusRoom(room)}
-              style={{ '--agent-color': room.color, '--agent-soft': room.softColor } as CSSProperties}
-              type="button"
-            >
-              <span className="agent-icon">{roomIcon(room)}</span>
-              <span className="agent-copy"><strong>{room.room}</strong><small>{status}</small></span>
-              <span className="agent-online" />
-            </button>
+            <div className={`room-nav-entry ${unreadCount > 0 ? 'has-unread' : ''}`} key={room.id}>
+              <button
+                className={`agent-card state-${agentState ?? 'local'} ${selectedRoomId === room.id ? 'is-active' : ''}`}
+                onClick={() => handleFocusRoom(room)}
+                style={{ '--agent-color': room.color, '--agent-soft': room.softColor } as CSSProperties}
+                type="button"
+              >
+                <span className="agent-icon">{roomIcon(room)}</span>
+                <span className="agent-copy"><strong>{room.room}</strong><small>{status}</small></span>
+                <span className="agent-online" />
+              </button>
+              <button
+                className="room-inbox-shortcut"
+                type="button"
+                aria-label={`Open ${room.room} inbox${unreadCount ? `, ${unreadCount} unread` : ''}`}
+                onClick={() => openRoomInbox(room.id)}
+              >
+                <span>✉ INBOX</span><b>{unreadCount || (alertsByRoom[room.id]?.length ?? 0)}</b>
+              </button>
+            </div>
           )
         })}
         </div>
@@ -551,6 +650,10 @@ function App() {
           <div><h2>{selectedRoom.agent}</h2><p>{selectedRoom.room}</p></div>
         </div>
         <div className="mission-role">{selectedRoom.role}</div>
+        <button className={`mission-inbox-button ${unreadByRoom[selectedRoom.id] ? 'has-unread' : ''}`} type="button" onClick={() => openRoomInbox(selectedRoom.id)}>
+          <span><i>✉</i> ROOM INBOX<small>{alertsByRoom[selectedRoom.id]?.length ?? 0} saved findings</small></span>
+          <b>{unreadByRoom[selectedRoom.id] ? `${unreadByRoom[selectedRoom.id]} NEW` : 'OPEN'}</b>
+        </button>
         <div className="mission-card">
           <small>CURRENT QUEST</small>
           <strong>{selectedQuest}</strong>
@@ -641,41 +744,87 @@ function App() {
         {error && <div className="runtime-error pixel-panel" role="alert">{error}</div>}
       </div>
 
-      <section
-        className={`alert-stack ${alerts.some(isLongAlert) ? 'has-long-output' : ''}`}
-        aria-label="Agent alerts"
-        aria-live="polite"
-      >
-        {alerts.map((alert) => (
-          <article
-            className={`alert-card pixel-panel ${isLongAlert(alert) ? 'is-expanded' : ''}`}
-            key={alert.id}
-          >
-            <header>
-              <b>{alert.creature}</b>
-              <span>{alert.phase === 'synthesis' ? 'PARTY SYNTHESIS · ' : ''}{alert.impact}</span>
+      {latestUnreadEntry && !inboxRoomId && (
+        <button
+          className="inbox-toast pixel-panel"
+          type="button"
+          aria-live="polite"
+          onClick={() => openRoomInbox(latestUnreadEntry.roomId, latestUnreadEntry.alert.id)}
+        >
+          <span className="inbox-toast-icon">✉</span>
+          <span><small>NEW FINDING · {rooms.find((room) => room.id === latestUnreadEntry.roomId)?.room}</small><strong>{latestUnreadEntry.alert.headline}</strong></span>
+          <b>OPEN INBOX</b>
+        </button>
+      )}
+
+      {inboxRoomId && inboxRoom && (
+        <div className="modal-backdrop inbox-backdrop" role="presentation" onMouseDown={() => setInboxRoomId(null)}>
+          <section className="room-inbox pixel-panel" role="dialog" aria-modal="true" aria-labelledby="inbox-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="inbox-header">
+              <div>
+                <span className="inbox-header-icon">✉</span>
+                <span><small>DEPARTMENT MAIL</small><h2 id="inbox-title">{inboxRoom.room} Inbox</h2></span>
+              </div>
+              <div className="inbox-header-actions">
+                <select aria-label="Inbox department" value={inboxRoom.id} onChange={(event) => openRoomInbox(event.target.value)}>
+                  {rooms.map((room) => <option key={room.id} value={room.id}>{room.room.toUpperCase()} · {unreadByRoom[room.id] ?? 0} NEW</option>)}
+                </select>
+                <button type="button" disabled={inboxAlerts.length === 0} onClick={markRoomInboxRead}>MARK ALL READ</button>
+                <button className="inbox-close" type="button" aria-label="Close room inbox" onClick={() => setInboxRoomId(null)}>×</button>
+              </div>
             </header>
-            <h2>{alert.headline}</h2>
-            <p>{alert.details}</p>
-            <strong>{alert.recommendation}</strong>
-            {alert.sources.length > 0 && (
-              <ul className="alert-sources" aria-label="Research sources">
-                {alert.sources.map((source) => (
-                  <li key={source}>
-                    {safeSourceUrl(source) ? (
-                      <a href={safeSourceUrl(source)!} target="_blank" rel="noreferrer">{source}</a>
-                    ) : <span>{source}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <footer>
-              <button type="button" onClick={() => dismissAlert(alert.id)}>DISMISS</button>
-              <button type="button" onClick={() => openRefineComposer(alert)}>DIG DEEPER</button>
-            </footer>
-          </article>
-        ))}
-      </section>
+
+            <div className="inbox-layout">
+              <nav className="inbox-message-list" aria-label={`${inboxRoom.room} messages`}>
+                <div className="inbox-list-summary"><span>{inboxAlerts.length} FINDINGS</span><b>{unreadByRoom[inboxRoom.id] ?? 0} UNREAD</b></div>
+                {inboxAlerts.length === 0 ? (
+                  <div className="inbox-empty-list"><i>✉</i><strong>ALL CLEAR</strong><small>New agent findings will arrive here.</small></div>
+                ) : inboxAlerts.map((alert) => {
+                  const unread = !readAlertIds.has(alert.id)
+                  return (
+                    <button
+                      className={`inbox-message ${activeInboxAlertId === alert.id ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`}
+                      key={alert.id}
+                      type="button"
+                      onClick={() => selectInboxAlert(alert.id)}
+                    >
+                      <span className="inbox-message-meta"><b>{alert.creature}</b><time>{formatInboxTime(alert.createdAt)}</time></span>
+                      <strong>{alert.headline}</strong>
+                      <small>{alert.phase === 'synthesis' ? 'PARTY SYNTHESIS' : alert.impact}</small>
+                      {unread && <i aria-label="Unread" />}
+                    </button>
+                  )
+                })}
+              </nav>
+
+              <article className="inbox-reader">
+                {activeInboxAlert ? (
+                  <>
+                    <header className="inbox-reader-header">
+                      <div><small>{activeInboxAlert.phase === 'synthesis' ? 'PARTY SYNTHESIS' : 'AGENT FINDING'} · {formatInboxTime(activeInboxAlert.createdAt)}</small><h3>{activeInboxAlert.headline}</h3></div>
+                      <span>{activeInboxAlert.creature.toUpperCase()}</span>
+                    </header>
+                    <div className="inbox-impact"><small>IMPACT</small><strong>{activeInboxAlert.impact}</strong></div>
+                    <section className="inbox-reading-section"><small>WHAT THE AGENT FOUND</small><p>{activeInboxAlert.details}</p></section>
+                    <section className="inbox-reading-section recommendation"><small>RECOMMENDED NEXT ACTION</small><strong>{activeInboxAlert.recommendation}</strong></section>
+                    {activeInboxAlert.sources.length > 0 && (
+                      <section className="inbox-reading-section"><small>SOURCES</small><ul className="inbox-sources">{activeInboxAlert.sources.map((source) => (
+                        <li key={source}>{safeSourceUrl(source) ? <a href={safeSourceUrl(source)!} target="_blank" rel="noreferrer">{source}</a> : <span>{source}</span>}</li>
+                      ))}</ul></section>
+                    )}
+                    <footer className="inbox-reader-actions">
+                      <button type="button" onClick={() => removeInboxAlert(activeInboxAlert.id)}>DELETE MESSAGE</button>
+                      <button className="inbox-primary-action" type="button" onClick={() => openRefineComposer(activeInboxAlert)}>DIG DEEPER</button>
+                    </footer>
+                  </>
+                ) : (
+                  <div className="inbox-empty-reader"><i>✉</i><h3>No findings yet</h3><p>Run a quest for {inboxRoom.room}. Responses will be saved here instead of covering the office.</p></div>
+                )}
+              </article>
+            </div>
+          </section>
+        </div>
+      )}
 
       {refineTarget && (
         <div className="modal-backdrop" role="presentation" onMouseDown={closeRefineComposer}>

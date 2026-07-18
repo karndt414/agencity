@@ -29,6 +29,7 @@ export type ApiUsage = {
 
 export type CreatureAlert = {
   id: string
+  createdAt: number
   creature: string
   headline: string
   details: string
@@ -69,7 +70,7 @@ type CityEvent = {
   estimated_cost_usd?: number
   pricing_available?: boolean
   error?: string
-  alert?: Omit<CreatureAlert, 'id' | 'creature'>
+  alert?: Omit<CreatureAlert, 'id' | 'createdAt' | 'creature'>
 }
 
 const initialStates = Object.fromEntries(
@@ -283,6 +284,7 @@ export function useAgencity() {
             {
               ...event.alert!,
               id: crypto.randomUUID(),
+              createdAt: Date.now(),
               creature: event.creature!,
               phase: event.phase,
               sources: event.alert!.sources ?? [],
