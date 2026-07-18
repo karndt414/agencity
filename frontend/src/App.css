@@ -1497,17 +1497,6 @@ p { margin: 0; }
 .zoom-hud .zoom-fit { min-width: 38px; font-size: 0.36rem; }
 .zoom-hud button:hover { background: #f8e9c4; }
 
-.pan-hint {
-  align-self: center;
-  padding: 0 7px;
-  border-left: 2px solid #b89570;
-  color: #806151;
-  font-size: 0.34rem;
-  font-weight: 950;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
 .mission-hud {
   position: absolute;
   z-index: 21;
@@ -2376,7 +2365,6 @@ p { margin: 0; }
   .mission-card strong { font-size: 0.48rem; }
   .room-plaque { top: 8px; left: 8px; padding: 4px; }
   .pixel-character { transform: scale(0.78); transform-origin: bottom; }
-  .pan-hint { display: none; }
   .alert-stack,
   .alert-stack.has-long-output {
     top: 66px;
