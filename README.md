@@ -130,6 +130,17 @@ memory. It's the harness Codex CLI won't expose.
 Agents SDK uses API credits (`OPENAI_API_KEY`). The Fayetteville event provides
 both Codex Credits AND API Credits to all attendees. You're covered.
 
+### Local setup and API key
+
+1. Copy `backend/.env.example` to `backend/.env`.
+2. Put the server-side key in `backend/.env` as `OPENAI_API_KEY=...`.
+3. From the repository root, run the backend with
+   `uv run --project backend uvicorn backend.main:app --reload`.
+4. In a second terminal, run `cd frontend && npm install && npm run dev`.
+
+The backend loads `backend/.env` automatically. Never put the OpenAI key in
+`frontend/`, a `VITE_*` variable, source code, or this README.
+
 ### How the web layer controls the agents
 
 The user never opens a terminal. Never sees code. The city IS the interface.

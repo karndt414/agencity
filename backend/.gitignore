@@ -2,3 +2,4 @@
 __pycache__/
 .pytest_cache/
 data/sessions.db
+data/sessions.db-*

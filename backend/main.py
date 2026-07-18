@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .alert_pipeline import CreatureAlert
+from .config import has_openai_api_key
 from .creature_manager import (
     DATA_FILES,
     load_data,
@@ -76,7 +76,7 @@ async def health() -> dict[str, Any]:
         "service": "agencity-backend",
         "agents_sdk": True,
         "agents_sdk_version": getattr(agents, "__version__", "unknown"),
-        "api_key_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "api_key_configured": has_openai_api_key(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from agents import Agent, SQLiteSession, handoff
 
 from .alert_pipeline import CreatureAlert
+from .config import AGENTS_MODEL
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPTS_DIR = ROOT / "prompts"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 SESSION_DB = DATA_DIR / "sessions.db"
-MODEL = os.getenv("AGENTS_MODEL", "gpt-5.4")
+MODEL = AGENTS_MODEL
 
 _COMMON_INSTRUCTIONS = """
 You are one creature in Agencity, a living city of autonomous founder-data agents.

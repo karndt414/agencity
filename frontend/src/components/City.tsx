@@ -1,7 +1,9 @@
 import { Float, OrbitControls, Text } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
+import { MathUtils } from 'three'
 import type { Group, Mesh } from 'three'
+import type { CreatureState } from '../hooks/useAgencity'
 
 type Plot = {
   name: string
@@ -18,18 +20,43 @@ const plots: Plot[] = [
   { name: 'LODE', role: 'TALENT FORGE', color: '#ffd166', position: [6, 0, -1.8], height: 3.3 },
 ]
 
-function Building({ plot }: { plot: Plot }) {
+type BuildingProps = {
+  onActivate: (name: string) => void
+  plot: Plot
+  state: CreatureState
+}
+
+function Building({ onActivate, plot, state }: BuildingProps) {
   const group = useRef<Group>(null)
   const beacon = useRef<Mesh>(null)
 
   useFrame(({ clock }) => {
     const time = clock.getElapsedTime()
-    if (group.current) group.current.rotation.y = Math.sin(time * 0.35 + plot.position[0]) * 0.025
-    if (beacon.current) beacon.current.scale.y = 0.82 + Math.sin(time * 2.4 + plot.position[2]) * 0.12
+    if (group.current) {
+      group.current.rotation.y = Math.sin(time * 0.35 + plot.position[0]) * 0.025
+      const targetScale = state === 'hunting' ? 1.08 : state === 'found' ? 1.14 : 1
+      const scale = MathUtils.lerp(group.current.scale.x, targetScale, 0.08)
+      group.current.scale.setScalar(scale)
+    }
+    if (beacon.current) {
+      const speed = state === 'hunting' ? 7 : 2.4
+      beacon.current.scale.y = 0.82 + Math.sin(time * speed + plot.position[2]) * 0.12
+    }
   })
 
+  const intensity = state === 'hunting' ? 1.2 : state === 'found' ? 2 : state === 'error' ? 0.1 : 0.3
+
   return (
-    <group ref={group} position={plot.position}>
+    <group
+      ref={group}
+      position={plot.position}
+      onClick={(event) => {
+        event.stopPropagation()
+        onActivate(plot.name.toLowerCase())
+      }}
+      onPointerEnter={() => { document.body.style.cursor = 'pointer' }}
+      onPointerLeave={() => { document.body.style.cursor = 'default' }}
+    >
       <mesh position={[0, 0.18, 0]} receiveShadow>
         <boxGeometry args={[3.1, 0.36, 3.1]} />
         <meshStandardMaterial color="#071d29" emissive={plot.color} emissiveIntensity={0.12} />
@@ -39,7 +66,7 @@ function Building({ plot }: { plot: Plot }) {
         <meshStandardMaterial
           color="#102332"
           emissive={plot.color}
-          emissiveIntensity={0.3}
+          emissiveIntensity={intensity}
           metalness={0.45}
           roughness={0.45}
         />
@@ -75,9 +102,17 @@ function Building({ plot }: { plot: Plot }) {
   )
 }
 
-function EmptyPlot() {
+function EmptyPlot({ onBuild }: { onBuild: () => void }) {
   return (
-    <group position={[0, 0, -3.4]}>
+    <group
+      position={[0, 0, -3.4]}
+      onClick={(event) => {
+        event.stopPropagation()
+        onBuild()
+      }}
+      onPointerEnter={() => { document.body.style.cursor = 'pointer' }}
+      onPointerLeave={() => { document.body.style.cursor = 'default' }}
+    >
       <mesh position={[0, 0.16, 0]}>
         <boxGeometry args={[3.1, 0.32, 3.1]} />
         <meshStandardMaterial color="#11291f" emissive="#4ac77d" emissiveIntensity={0.08} />
@@ -111,7 +146,13 @@ function EmptyPlot() {
   )
 }
 
-export default function City() {
+type CityProps = {
+  onBuild: () => void
+  onHunt: (name: string) => void
+  states: Record<string, CreatureState>
+}
+
+export default function City({ onBuild, onHunt, states }: CityProps) {
   return (
     <>
       <color attach="background" args={['#03070d']} />
@@ -127,8 +168,15 @@ export default function City() {
       </mesh>
       <gridHelper args={[34, 34, '#25516a', '#0b2432']} position={[0, 0.02, 0]} />
 
-      {plots.map((plot) => <Building key={plot.name} plot={plot} />)}
-      <EmptyPlot />
+      {plots.map((plot) => (
+        <Building
+          key={plot.name}
+          onActivate={onHunt}
+          plot={plot}
+          state={states[plot.name.toLowerCase()] ?? 'idle'}
+        />
+      ))}
+      <EmptyPlot onBuild={onBuild} />
       <OrbitControls enablePan={false} minDistance={9} maxDistance={25} maxPolarAngle={Math.PI / 2.05} />
     </>
   )
