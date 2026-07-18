@@ -5,6 +5,7 @@
   --paper-light: #fff4d9;
   --panel-border: #5d4337;
   --pixel-shadow: #3c2b29;
+  --button-hover-highlight: #f8e9c4;
 }
 
 * {
@@ -1542,7 +1543,13 @@ p { margin: 0; }
 .zoom-hud button + button { border-left: 2px solid #b89570; }
 .zoom-hud .zoom-readout { min-width: 52px; font-size: 0.4rem; }
 .zoom-hud .zoom-fit { min-width: 38px; font-size: 0.36rem; }
-.zoom-hud button:hover { background: #f8e9c4; }
+
+@media (hover: hover) {
+  .zoom-hud button:hover {
+    background: var(--button-hover-highlight);
+    box-shadow: inset 0 0 0 2px #d8b982;
+  }
+}
 
 .mission-hud {
   position: absolute;
@@ -2485,6 +2492,13 @@ p { margin: 0; }
   border-color: #7d3f39;
   background: #b9574d;
   color: #fff0d1;
+}
+
+@media (hover: hover) {
+  .game-shell button:not(:disabled):not(.pixel-room):hover {
+    background: var(--button-hover-highlight);
+    color: var(--ink);
+  }
 }
 
 @keyframes hunting-blink {
