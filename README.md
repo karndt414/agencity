@@ -132,7 +132,7 @@ both Codex Credits AND API Credits to all attendees. You're covered.
 
 ### Local setup and API key
 
-1. Copy `backend/.env.example` to `backend/.env`.
+1. Copy `backend/.env.example` to `backend/.env` (a starter file is included locally).
 2. Put the server-side key in `backend/.env` as `OPENAI_API_KEY=...`.
 3. From the repository root, run the backend with
    `uv run --project backend uvicorn backend.main:app --reload`.
@@ -140,6 +140,22 @@ both Codex Credits AND API Credits to all attendees. You're covered.
 
 The backend loads `backend/.env` automatically. Never put the OpenAI key in
 `frontend/`, a `VITE_*` variable, source code, or this README.
+
+The current tool inventory is available at `GET /api/tools`. Agents have web
+search, specialist handoffs, bounded source-file read/write tools, an
+inspection-only repository terminal, and compile-only Python checks. Generated
+code and Markdown files are written without execute permission. The terminal
+does not run application code, tests, package scripts, network commands, or
+shell operators; it is limited to `pwd`, `ls`, `rg`, selected `git` inspection,
+and Python `compileall`/`json.tool` checks.
+
+For multi-step work, `POST /api/tasks` runs the four specialist workers in
+parallel using `WORKER_MODEL`, then sends their reports to a separate
+`ORCHESTRATOR_MODEL` agent for structured synthesis. Set both model roles in
+`backend/.env`; `report_path` can persist the compiled Markdown report under a
+safe workspace path. Workers must cite exact URLs for public research or exact
+repository/data references for supplied records; the orchestrator omits uncited
+findings from the final report and records the omission as a risk.
 
 ### How the web layer controls the agents
 

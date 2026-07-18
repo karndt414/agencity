@@ -26,6 +26,22 @@ export type CreatureAlert = {
   phase?: string
 }
 
+export type TaskReport = {
+  task: string
+  summary: string
+  findings: Array<{
+    worker: string
+    headline: string
+    details: string
+    impact: string
+    recommendation: string
+    sources: string[]
+  }>
+  recommendations: string[]
+  risks: string[]
+  sources: string[]
+}
+
 type ConnectionState = 'connecting' | 'online' | 'offline'
 
 type ReleaseAllResponse = {
@@ -57,6 +73,7 @@ type CityEvent = {
   pricing_available?: boolean
   error?: string
   alert?: Omit<CreatureAlert, 'id' | 'creature'>
+  report?: TaskReport
 }
 
 const initialStates = Object.fromEntries(
@@ -80,6 +97,7 @@ export function useAgencity() {
   const [creatures, setCreatures] = useState<string[]>([...CORE_CREATURES])
   const [states, setStates] = useState<Record<string, CreatureState>>(initialStates)
   const [alerts, setAlerts] = useState<CreatureAlert[]>([])
+  const [reports, setReports] = useState<TaskReport[]>([])
   const [thoughts, setThoughts] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [usage, setUsage] = useState<ApiUsage>({
@@ -196,6 +214,10 @@ export function useAgencity() {
             },
             ...current,
           ])
+          setError(null)
+        }
+        if (event.type === 'report' && event.report) {
+          setReports((current) => [event.report!, ...current].slice(0, 4))
           setError(null)
         }
         if (event.type === 'error') {
@@ -345,6 +367,7 @@ export function useAgencity() {
     hunt,
     refine,
     releaseAll,
+    reports,
     spawn,
     states,
     thoughts,

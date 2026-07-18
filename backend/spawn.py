@@ -3,9 +3,9 @@ from __future__ import annotations
 from agents import Agent
 
 from .alert_pipeline import CreatureAlert
+from .config import WORKER_MODEL
 from .creatures import (
     COMMON_INSTRUCTIONS,
-    MODEL,
     build_agent_tools,
     register_creature,
     normalize_name,
@@ -25,7 +25,7 @@ def spawn_creature(name: str, instructions: str, model: str | None = None) -> Ag
     creature = Agent(
         name=clean_name,
         instructions=f"{COMMON_INSTRUCTIONS}\n\n{clean_instructions}",
-        model=model or MODEL,
+        model=model or WORKER_MODEL,
         output_type=CreatureAlert,
         tools=build_agent_tools(),
     )

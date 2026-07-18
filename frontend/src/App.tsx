@@ -101,6 +101,7 @@ function App() {
     hunt,
     refine,
     releaseAll,
+    reports,
     spawn,
     states,
     thoughts,
@@ -599,6 +600,18 @@ function App() {
         aria-label="Agent alerts"
         aria-live="polite"
       >
+        {reports.slice(0, 1).map((report) => (
+          <article className="report-card pixel-panel" key={`${report.task}-${report.summary}`}>
+            <header><b>TASK REPORT</b><span>{report.findings.length} WORKER FINDINGS</span></header>
+            <h2>{report.task}</h2>
+            <p>{report.summary}</p>
+            {report.recommendations.length > 0 && (
+              <ul>
+                {report.recommendations.slice(0, 3).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+              </ul>
+            )}
+          </article>
+        ))}
         {alerts.map((alert) => (
           <article
             className={`alert-card pixel-panel ${isLongAlert(alert) ? 'is-expanded' : ''}`}

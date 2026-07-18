@@ -1874,6 +1874,48 @@ p { margin: 0; }
   animation: alert-arrive 220ms steps(3) both;
 }
 
+.report-card {
+  width: 100%;
+  padding: 10px;
+  border-color: #6d7f52;
+  background: #f1e6bc;
+  pointer-events: auto;
+  animation: alert-arrive 220ms steps(3) both;
+}
+
+.report-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #5f744b;
+  font-size: 0.4rem;
+  letter-spacing: 0.08em;
+}
+
+.report-card h2 {
+  margin: 8px 0 5px;
+  color: #4b362e;
+  font-size: 0.62rem;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.report-card p,
+.report-card li {
+  color: #745548;
+  font-size: 0.45rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.report-card ul {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 .alert-card header,
 .alert-card footer {
   display: flex;
