@@ -112,6 +112,7 @@ function formatInboxTime(createdAt: number): string {
 function App() {
   const {
     activities,
+    artifactLocation,
     alerts,
     apiKeyConfigured,
     connection,
@@ -123,6 +124,7 @@ function App() {
     giveQuest,
     refine,
     releaseAll,
+    reports,
     spawn,
     states,
     stopAgents,
@@ -897,8 +899,29 @@ function App() {
           <div className="configuration-warning pixel-panel" role="alert">ADD <code>OPENAI_API_KEY</code> TO <code>backend/.env</code></div>
         )}
         {error && <div className="runtime-error pixel-panel" role="alert">{error}</div>}
+        {artifactLocation && (
+          <div className="artifact-location pixel-panel" role="status">
+            <span>WEBSITE OUTPUT</span>
+            <code>{artifactLocation.entrypoint}</code>
+            {artifactLocation.files.length > 0 && (
+              <small>{artifactLocation.files.join(' · ')}</small>
+            )}
+          </div>
+        )}
       </div>
 
+      {reports.slice(0, 1).map((report) => (
+        <article className="report-card pixel-panel" key={`${report.task}-${report.summary}`}>
+          <header><b>TASK REPORT</b><span>{report.findings.length} WORKER FINDINGS</span></header>
+          <h2>{report.task}</h2>
+          <p>{report.summary}</p>
+          {report.recommendations.length > 0 && (
+            <ul>
+              {report.recommendations.slice(0, 3).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+            </ul>
+          )}
+        </article>
+      ))}
       {latestUnreadEntry && !inboxRoomId && (
         <button
           className="inbox-toast pixel-panel"

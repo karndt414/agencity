@@ -8,9 +8,9 @@ from typing import Any
 from agents import Agent
 
 from .alert_pipeline import CreatureAlert
+from .config import WORKER_MODEL
 from .creatures import (
     COMMON_INSTRUCTIONS,
-    MODEL,
     build_agent_tools,
     register_creature,
     normalize_name,
@@ -74,7 +74,7 @@ def spawn_creature(
     if not clean_instructions:
         raise ValueError("Creature instructions are required")
 
-    selected_model = model or MODEL
+    selected_model = model or WORKER_MODEL
     creature = Agent(
         name=clean_name,
         instructions=f"{COMMON_INSTRUCTIONS}\n\n{clean_instructions}",

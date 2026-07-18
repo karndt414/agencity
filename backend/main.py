@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Awaitable, TypeVar
 
 import agents
@@ -11,18 +12,30 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .alert_pipeline import CreatureAlert
-from .artifacts import read_artifact
-from .config import has_openai_api_key
+from .artifacts import (
+    artifact_directory_for_task,
+    artifact_entrypoint_for_task,
+    list_artifact_files,
+    prepare_artifact_directory,
+    read_artifact,
+)
+from .config import ORCHESTRATOR_MODEL, WORKER_MODEL, has_openai_api_key
 from .creature_manager import (
+    DATA_FILES,
     collaborate_on_quest,
     coordinate_room_quest,
     direct_creatures,
+    load_data,
+    orchestrate_quest,
     refine_hunt,
     release_all,
     hunt_creature as run_hunt,
 )
 from .creatures import CREATURES, get_creature, normalize_name
+from .reporting import render_task_report
 from .spawn import ensure_spawned_creature, restore_spawned_creatures, spawn_creature
+from .terminal_tools import TOOL_CATALOG, execute_python_check, execute_terminal_command
+from .workspace_tools import write_workspace_file_impl
 
 restore_spawned_creatures()
 
@@ -98,6 +111,22 @@ class QuestRequest(BaseModel):
     data: dict[str, Any] | None = None
 
 
+class TaskRequest(BaseModel):
+    task: str
+    target: str = "all"
+    data: dict[str, Any] | None = None
+    report_path: str | None = None
+
+
+class TerminalRequest(BaseModel):
+    command: str
+    cwd: str = "."
+
+
+class PythonCheckRequest(BaseModel):
+    target: str = "backend"
+
+
 manager = ConnectionManager()
 app = FastAPI(title="Agencity Backend", version="0.2.0")
 app.add_middleware(
@@ -109,6 +138,21 @@ app.add_middleware(
 )
 
 
+def _artifact_payload(task: str) -> dict[str, Any]:
+    directory = artifact_directory_for_task(task)
+    return {
+        "artifact_directory": directory,
+        "artifact_entrypoint": artifact_entrypoint_for_task(task),
+        "artifact_files": list_artifact_files(directory),
+    }
+
+
+async def _publish_artifact_location(task: str) -> None:
+    payload = _artifact_payload(task)
+    if payload["artifact_directory"]:
+        await manager.broadcast({"type": "artifacts", **payload})
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {
@@ -117,6 +161,8 @@ async def health() -> dict[str, Any]:
         "agents_sdk": True,
         "agents_sdk_version": getattr(agents, "__version__", "unknown"),
         "api_key_configured": has_openai_api_key(),
+        "orchestrator_model": ORCHESTRATOR_MODEL,
+        "worker_model": WORKER_MODEL,
         "evidence_policy": "web-first",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -162,6 +208,97 @@ async def artifact_endpoint(artifact_id: str, download: bool = False) -> Respons
     return HTMLResponse(content=content, headers=headers)
 
 
+@app.get("/api/tools")
+async def list_tools() -> dict[str, list[dict[str, str]]]:
+    return {"tools": TOOL_CATALOG}
+
+
+@app.post("/api/tools/terminal")
+async def terminal_endpoint(request: TerminalRequest) -> dict[str, Any]:
+    try:
+        return await execute_terminal_command(request.command, request.cwd)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/tools/python")
+async def python_check_endpoint(request: PythonCheckRequest) -> dict[str, Any]:
+    try:
+        return await execute_python_check(request.target)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _result_payload(results: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        name: (
+            {"status": "found", "alert": value.model_dump()}
+            if isinstance(value, CreatureAlert)
+            else {"status": "error", "error": str(value)}
+        )
+        for name, value in results.items()
+    }
+
+
+@app.post("/api/tasks")
+async def task_endpoint(request: TaskRequest) -> dict[str, Any]:
+    task = request.task.strip()
+    if not task:
+        raise HTTPException(status_code=422, detail="Task is required")
+    artifact_directory = prepare_artifact_directory(artifact_directory_for_task(task))
+
+    target = normalize_name(request.target)
+    if target == "all":
+        names = list(CREATURES)
+    else:
+        try:
+            get_creature(target)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        names = [target]
+
+    data_by_creature = {
+        name: (
+            request.data
+            if request.data is not None
+            else load_data(name) if name in DATA_FILES else {}
+        )
+        for name in names
+    }
+    results, report = await _tracked_run(
+        orchestrate_quest(
+            names,
+            task,
+            data_by_creature,
+            manager.broadcast,
+        )
+    )
+    response: dict[str, Any] = {
+        "task": task,
+        "target": target,
+        "results": _result_payload(results),
+        "report": report.model_dump() if report else None,
+        **_artifact_payload(task),
+    }
+    report_path = request.report_path
+    if report_path is None and report is not None and artifact_directory:
+        report_path = f"{artifact_directory}/REPORT.md"
+    if report_path and report is not None:
+        if Path(report_path).suffix.lower() != ".md":
+            raise HTTPException(status_code=400, detail="report_path must end in .md")
+        try:
+            response["artifact"] = write_workspace_file_impl(
+                report_path,
+                render_task_report(report),
+                overwrite=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response.update(_artifact_payload(task))
+    await _publish_artifact_location(task)
+    return response
+
+
 @app.post("/api/creatures/release-all")
 async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict[str, Any]:
     supplied = request.data if request and request.data else {}
@@ -171,14 +308,7 @@ async def release_all_endpoint(request: ReleaseAllRequest | None = None) -> dict
     }
     results = await _tracked_run(release_all(data, manager.broadcast))
     return {
-        "results": {
-            name: (
-                {"status": "found", "alert": value.model_dump()}
-                if isinstance(value, CreatureAlert)
-                else {"status": "error", "error": str(value)}
-            )
-            for name, value in results.items()
-        }
+        "results": _result_payload(results),
     }
 
 
@@ -236,6 +366,7 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
     quest = request.quest.strip()
     if not quest:
         raise HTTPException(status_code=422, detail="Quest is required")
+    prepare_artifact_directory(artifact_directory_for_task(quest))
 
     target = normalize_name(request.target)
     if target == "all":
@@ -284,18 +415,14 @@ async def quest_endpoint(request: QuestRequest) -> dict[str, Any]:
         )
     )
     results = await _tracked_run(operation)
-    return {
+    response = {
         "quest": quest,
         "target": target,
-        "results": {
-            name: (
-                {"status": "found", "alert": value.model_dump()}
-                if isinstance(value, CreatureAlert)
-                else {"status": "error", "error": str(value)}
-            )
-            for name, value in results.items()
-        },
+        "results": _result_payload(results),
+        **_artifact_payload(quest),
     }
+    await _publish_artifact_location(quest)
+    return response
 
 
 @app.websocket("/ws")

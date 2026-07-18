@@ -8,8 +8,14 @@ from typing import Any, Awaitable, Callable
 from agents import Runner
 
 from .alert_pipeline import CreatureAlert, parse_alert
-from .artifacts import materialize_artifact
-from .creatures import CREATURES, get_creature, get_session, normalize_name
+from .artifacts import (
+    artifact_directory_for_task,
+    artifact_location_instructions,
+    materialize_artifact,
+)
+from .config import ORCHESTRATOR_MODEL, WORKER_MODEL
+from .creatures import CREATURES, ORCHESTRATOR, get_creature, get_session, normalize_name
+from .reporting import TaskReport, enforce_citations, parse_task_report
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_FILES = {
@@ -62,6 +68,11 @@ def load_data(name: str) -> dict[str, Any]:
     if filename is None:
         raise KeyError(f"No seeded data source for creature: {name}")
     return json.loads((DATA_DIR / filename).read_text(encoding="utf-8"))
+
+
+def _data_source_reference(name: str) -> str:
+    filename = DATA_FILES.get(normalize_name(name))
+    return f"backend/data/{filename}" if filename else "founder-supplied task data"
 
 
 def _internal_context(data: dict[str, Any]) -> str:
@@ -159,6 +170,7 @@ async def _run(
     phase: str,
     *,
     publish_alert: bool = True,
+    artifact_directory: str | None = None,
 ) -> CreatureAlert:
     key = normalize_name(name)
     agent = get_creature(key)
@@ -181,6 +193,8 @@ async def _run(
             model = agent.model if isinstance(agent.model, str) else str(agent.model)
             await _emit(sink, _usage_message(key, model, result.context_wrapper.usage))
             alert = parse_alert(result.final_output)
+            if artifact_directory:
+                alert.artifact_directory = artifact_directory
             if publish_alert:
                 alert = materialize_artifact(alert)
         except asyncio.CancelledError:
@@ -201,6 +215,66 @@ async def _run(
         )
     await _emit(sink, {"type": "state", "creature": key, "state": "found", "phase": phase})
     return alert
+
+
+async def _run_orchestrator(
+    task: str,
+    peer_reports: dict[str, CreatureAlert],
+    sink: EventSink | None,
+) -> TaskReport:
+    """Compile cheap worker outputs with the dedicated orchestrator model."""
+
+    artifact_directory = artifact_directory_for_task(task)
+    await _emit(
+        sink,
+        {
+            "type": "state",
+            "creature": "orchestrator",
+            "state": "hunting",
+            "phase": "synthesis",
+        },
+    )
+    synthesis_input = (
+        "FOUNDER TASK\n"
+        f"{task.strip()}\n\n"
+        f"{artifact_location_instructions(task)}\n\n"
+        "SPECIALIST WORKER REPORTS\n"
+        f"{json.dumps({name: report.model_dump() for name, report in peer_reports.items()}, ensure_ascii=False, indent=2)}\n\n"
+        "Compile the worker evidence into one structured TaskReport. Preserve exact URLs, "
+        "attribute findings to workers, resolve conflicts in risks, and keep recommendations "
+        "concrete. Include only findings directly relevant to the founder task. Every finding "
+        "must retain at least one exact source URL or supplied-data/repository reference; omit "
+        "uncited or unrelated findings and record that omission in risks. If the task requests "
+        "artifacts, write them with the safe workspace file tool and never execute generated code."
+    )
+
+    try:
+        result = Runner.run_streamed(
+            ORCHESTRATOR,
+            input=synthesis_input,
+            max_turns=8,
+        )
+        async for event in result.stream_events():
+            message = event_to_message("orchestrator", event)
+            if message is not None:
+                await _emit(sink, message)
+
+        model = ORCHESTRATOR.model if isinstance(ORCHESTRATOR.model, str) else str(ORCHESTRATOR.model)
+        await _emit(sink, _usage_message("orchestrator", model, result.context_wrapper.usage))
+        report = enforce_citations(parse_task_report(result.final_output))
+        report.artifact_directory = artifact_directory
+    except Exception:
+        await _emit(
+            sink,
+            {"type": "state", "creature": "orchestrator", "state": "error", "phase": "synthesis"},
+        )
+        raise
+
+    await _emit(
+        sink,
+        {"type": "state", "creature": "orchestrator", "state": "found", "phase": "synthesis"},
+    )
+    return report
 
 
 async def hunt_creature(
@@ -228,11 +302,13 @@ async def refine_hunt(
 ) -> CreatureAlert:
     if not follow_up.strip():
         raise ValueError("Follow-up prompt is required")
+    artifact_directory = artifact_directory_for_task(follow_up)
     return await _run(
         name,
         (
             "WEB-FIRST FOLLOW-UP\n"
             f"{follow_up.strip()}\n\n"
+            f"{artifact_location_instructions(follow_up)}\n\n"
             "Search the live public web before answering. Treat any internal claims in "
             "session memory as unverified unless the founder explicitly supplied them, "
             "and preserve exact supporting URLs in `sources`. If the follow-up asks you "
@@ -241,6 +317,7 @@ async def refine_hunt(
         ),
         sink,
         phase="refine",
+        artifact_directory=artifact_directory,
     )
 
 
@@ -249,24 +326,38 @@ async def direct_creature(
     quest: str,
     data: dict[str, Any],
     sink: EventSink | None = None,
+    *,
+    write_artifacts: bool = True,
 ) -> CreatureAlert:
     """Give an existing creature a founder-authored quest with its available data."""
 
     clean_quest = quest.strip()
     if not clean_quest:
         raise ValueError("Quest is required")
+    artifact_directory = artifact_directory_for_task(clean_quest)
 
     input_text = (
         "NEW WEB-FIRST QUEST FROM THE FOUNDER\n"
         f"{clean_quest}\n\n"
-        "Search the live public web first. Complete this quest using your specialty, "
-        "cite exact URLs, and return the most actionable structured alert supported by "
-        "current public evidence. If the quest asks you to code, build, or prototype, "
-        "the deliverable must be a working self-contained HTML file in `artifact`; do "
-        "not substitute a plan, code excerpt, or prose-only answer.\n\n"
+        f"{artifact_location_instructions(clean_quest, write_files=write_artifacts)}\n\n"
+        "Search the live public web first. Complete this quest using your specialty "
+        "and the available data. Cite every factual claim with exact supporting URLs; "
+        "if a supplied private record informs the answer, cite the supplied data "
+        "reference below and label it as user-provided. Return the most actionable "
+        "structured alert supported by current evidence. If the quest asks you to "
+        "code, build, or prototype, write the final workspace files and also return a "
+        "working self-contained HTML preview in `artifact`; do not substitute a plan, "
+        "code excerpt, or prose-only answer.\n\n"
+        f"SUPPLIED DATA REFERENCE\n{_data_source_reference(name)}\n\n"
         f"{_internal_context(data)}"
     )
-    return await _run(name, input_text, sink, phase="quest")
+    return await _run(
+        name,
+        input_text,
+        sink,
+        phase="quest",
+        artifact_directory=artifact_directory,
+    )
 
 
 async def direct_creatures(
@@ -274,12 +365,20 @@ async def direct_creatures(
     quest: str,
     data_by_creature: dict[str, dict[str, Any]],
     sink: EventSink | None = None,
+    *,
+    write_artifacts: bool = True,
 ) -> dict[str, CreatureAlert | Exception]:
     """Dispatch one quest to one or more existing creatures in parallel."""
 
     results = await asyncio.gather(
         *(
-            direct_creature(name, quest, data_by_creature.get(name, {}), sink)
+            direct_creature(
+                name,
+                quest,
+                data_by_creature.get(name, {}),
+                sink,
+                write_artifacts=write_artifacts,
+            )
             for name in names
         ),
         return_exceptions=True,
@@ -296,10 +395,12 @@ async def support_room_quest(
 ) -> CreatureAlert:
     """Research one delegated workstream without publishing a room-level answer."""
 
+    artifact_directory = artifact_directory_for_task(quest)
     input_text = (
         "DELEGATED SUPPORT ASSIGNMENT FROM YOUR ROOM PM\n"
         f"Room PM: {coordinator}\n"
         f"Founder quest: {quest.strip()}\n\n"
+        f"{artifact_location_instructions(quest, write_files=False)}\n\n"
         "You are a supporting specialist, not the room decision-maker. Search the live "
         "public web for evidence in your specialty, cite exact URLs, and report concise "
         "findings and risks back to your PM. Do not present your work as the room's final "
@@ -312,6 +413,7 @@ async def support_room_quest(
         sink,
         phase="support",
         publish_alert=False,
+        artifact_directory=artifact_directory,
     )
 
 
@@ -325,6 +427,7 @@ async def coordinate_room_quest(
     """Let a room PM delegate research and publish the room's final synthesis."""
 
     pm = normalize_name(coordinator)
+    artifact_directory = artifact_directory_for_task(quest)
     team = list(dict.fromkeys(
         normalize_name(name)
         for name in supporters
@@ -343,6 +446,11 @@ async def coordinate_room_quest(
             "quest": quest,
             "coordinator": pm,
             "participants": participants,
+            **(
+                {"artifact_directory": artifact_directory}
+                if artifact_directory
+                else {}
+            ),
         },
     )
     for supporter in team:
@@ -393,6 +501,7 @@ async def coordinate_room_quest(
     synthesis_input = (
         "ROOM PM FINAL SYNTHESIS\n"
         f"Founder quest: {quest.strip()}\n\n"
+        f"{artifact_location_instructions(quest)}\n\n"
         "You are the room PM and final decision-maker. Your subagents completed delegated "
         "specialist research below. Evaluate their evidence, resolve conflicts, fill any "
         "material gaps with live public web research, and publish one clear room-level "
@@ -404,7 +513,13 @@ async def coordinate_room_quest(
         f"{_internal_context(data_by_creature.get(pm, {}))}"
     )
     try:
-        results[pm] = await _run(pm, synthesis_input, sink, phase="synthesis")
+        results[pm] = await _run(
+            pm,
+            synthesis_input,
+            sink,
+            phase="synthesis",
+            artifact_directory=artifact_directory,
+        )
     except Exception as exc:
         results[pm] = exc
         await _emit(
@@ -454,7 +569,14 @@ async def collaborate_on_quest(
 ) -> dict[str, CreatureAlert | Exception]:
     """Run a party council: specialist research followed by peer synthesis."""
 
-    first_pass = await direct_creatures(names, quest, data_by_creature, sink)
+    artifact_directory = artifact_directory_for_task(quest)
+    first_pass = await direct_creatures(
+        names,
+        quest,
+        data_by_creature,
+        sink,
+        write_artifacts=False,
+    )
     reports = {
         name: result
         for name, result in first_pass.items()
@@ -471,6 +593,11 @@ async def collaborate_on_quest(
             "quest": quest,
             "coordinator": coordinator,
             "participants": list(reports),
+            **(
+                {"artifact_directory": artifact_directory}
+                if artifact_directory
+                else {}
+            ),
         },
     )
     for name, report in reports.items():
@@ -493,14 +620,18 @@ async def collaborate_on_quest(
     synthesis_input = (
         "PARTY COUNCIL SYNTHESIS\n"
         f"Founder quest: {quest.strip()}\n\n"
+        f"{artifact_location_instructions(quest)}\n\n"
         "Your fellow creatures completed independent specialist investigations. "
         "Compare their evidence, resolve conflicts, connect findings across specialties, "
         "and return one prioritized party recommendation. Search the live web to verify "
-        "the most important claims before synthesizing. Preserve exact supporting URLs "
-        "in the `sources` field. Treat peer claims without public URLs as unverified. "
-        "You may use a handoff if a material gap remains.\n\n"
-        "If the founder requested code, the coordinator must return the complete working "
-        "self-contained HTML file in the final `artifact`, not a plan or excerpt.\n\n"
+        "the most important claims before synthesizing. Every factual claim must retain "
+        "an exact supporting URL or an explicit supplied-data/repository reference in "
+        "the `sources` field. Treat peer claims without traceable sources as unverified "
+        "and omit them from the final answer. You may use a handoff if a material gap "
+        "remains.\n\n"
+        "If the founder requested code, the coordinator must write the required workspace "
+        "files and return the complete working self-contained HTML preview in the final "
+        "`artifact`, not a plan or excerpt.\n\n"
         f"PEER REPORTS\n{json.dumps(peer_reports, ensure_ascii=False, indent=2)}"
     )
     try:
@@ -509,6 +640,7 @@ async def collaborate_on_quest(
             synthesis_input,
             sink,
             phase="synthesis",
+            artifact_directory=artifact_directory,
         )
     except Exception as exc:
         await _emit(
@@ -541,6 +673,107 @@ async def collaborate_on_quest(
         },
     )
     return first_pass
+
+
+async def orchestrate_quest(
+    names: list[str],
+    quest: str,
+    data_by_creature: dict[str, dict[str, Any]],
+    sink: EventSink | None = None,
+) -> tuple[dict[str, CreatureAlert | Exception], TaskReport | None]:
+    """Run parallel low-cost workers, then compile their reports with the orchestrator."""
+
+    artifact_directory = artifact_directory_for_task(quest)
+    first_pass = await direct_creatures(
+        names,
+        quest,
+        data_by_creature,
+        sink,
+        write_artifacts=False,
+    )
+    reports = {
+        name: result
+        for name, result in first_pass.items()
+        if isinstance(result, CreatureAlert)
+    }
+    failures = [
+        f"{name}: {result}"
+        for name, result in first_pass.items()
+        if isinstance(result, Exception)
+    ]
+    await _emit(
+        sink,
+        {
+            "type": "collaboration_start",
+            "quest": quest,
+            "coordinator": "orchestrator",
+            "lead_worker": select_quest_coordinator(quest, list(reports)) if reports else None,
+            "participants": list(reports),
+            "worker_model": WORKER_MODEL,
+            "orchestrator_model": ORCHESTRATOR_MODEL,
+            **(
+                {"artifact_directory": artifact_directory}
+                if artifact_directory
+                else {}
+            ),
+        },
+    )
+    for name, report in reports.items():
+        await _emit(
+            sink,
+            {
+                "type": "collaboration",
+                "from": name,
+                "to": "orchestrator",
+                "headline": report.headline,
+            },
+        )
+
+    if not reports:
+        report = TaskReport(
+            task=quest.strip(),
+            summary="No specialist worker completed successfully.",
+            risks=failures or ["No worker reports were returned."],
+            artifact_directory=artifact_directory,
+        )
+        await _emit(
+            sink,
+            {
+                "type": "report",
+                "task": quest,
+                "orchestrator_model": ORCHESTRATOR_MODEL,
+                "worker_model": WORKER_MODEL,
+                "report": report.model_dump(),
+            },
+        )
+        return first_pass, report
+
+    try:
+        report = await _run_orchestrator(quest, reports, sink)
+    except Exception as exc:
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_error",
+                "coordinator": "orchestrator",
+                "error": str(exc),
+            },
+        )
+        return first_pass, None
+
+    if failures:
+        report.risks = [*report.risks, *failures]
+    await _emit(
+        sink,
+        {
+            "type": "report",
+            "task": quest,
+            "orchestrator_model": ORCHESTRATOR_MODEL,
+            "worker_model": WORKER_MODEL,
+            "report": report.model_dump(),
+        },
+    )
+    return first_pass, report
 
 
 async def release_all(
