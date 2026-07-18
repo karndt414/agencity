@@ -28,6 +28,15 @@ const stateLabels: Record<CreatureState, string> = {
   error: 'Needs attention',
 }
 
+function safeSourceUrl(source: string): string | null {
+  try {
+    const url = new URL(source)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 function App() {
   const {
     alerts,
@@ -228,6 +237,17 @@ function App() {
             <h2>{alert.headline}</h2>
             <p>{alert.details}</p>
             <strong>{alert.recommendation}</strong>
+            {alert.sources.length > 0 && (
+              <ul className="alert-sources" aria-label="Research sources">
+                {alert.sources.map((source) => (
+                  <li key={source}>
+                    {safeSourceUrl(source) ? (
+                      <a href={safeSourceUrl(source)!} target="_blank" rel="noreferrer">{source}</a>
+                    ) : <span>{source}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
             <footer>
               <button type="button" onClick={() => dismissAlert(alert.id)}>DISMISS</button>
               <button type="button" onClick={() => void refine(alert.creature)}>DIG DEEPER</button>
@@ -270,7 +290,7 @@ function App() {
                 />
               </label>
               <p className="quest-help">
-                The selected agents will use their existing specialty, seeded data, and session memory.
+                Agents use their specialty, seeded data, session memory, and live web search when current public information is needed.
               </p>
               {questError && <p className="form-error" role="alert">{questError}</p>}
               <div className="modal-actions">

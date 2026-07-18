@@ -3,7 +3,13 @@ from __future__ import annotations
 from agents import Agent
 
 from .alert_pipeline import CreatureAlert
-from .creatures import MODEL, register_creature, normalize_name
+from .creatures import (
+    COMMON_INSTRUCTIONS,
+    MODEL,
+    build_agent_tools,
+    register_creature,
+    normalize_name,
+)
 
 
 def spawn_creature(name: str, instructions: str, model: str | None = None) -> Agent[object]:
@@ -18,9 +24,10 @@ def spawn_creature(name: str, instructions: str, model: str | None = None) -> Ag
 
     creature = Agent(
         name=clean_name,
-        instructions=clean_instructions,
+        instructions=f"{COMMON_INSTRUCTIONS}\n\n{clean_instructions}",
         model=model or MODEL,
         output_type=CreatureAlert,
+        tools=build_agent_tools(),
     )
     register_creature(normalize_name(clean_name), creature)
     return creature

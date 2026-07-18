@@ -1330,6 +1330,24 @@ p { margin: 0; }
   line-height: 1.55;
 }
 
+.alert-sources {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0 0;
+  padding: 7px 7px 7px 20px;
+  border: 2px solid #b89570;
+  background: #f8e9c6;
+  font-size: 0.38rem;
+}
+
+.alert-sources a {
+  display: block;
+  overflow: hidden;
+  color: #5b7047;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .alert-card > strong {
   margin-top: 6px;
   color: #4f713f;

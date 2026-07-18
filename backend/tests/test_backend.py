@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from agents import WebSearchTool
 
 from backend.alert_pipeline import CreatureAlert, parse_alert
 from backend.creatures import CREATURES
@@ -14,6 +15,10 @@ def test_health_and_agent_registry() -> None:
     assert health.json()["status"] == "ok"
     assert health.json()["agents_sdk"] is True
     assert {"pyre", "fetch", "sight", "lode"}.issubset(CREATURES)
+    assert all(
+        any(isinstance(tool, WebSearchTool) for tool in CREATURES[name].tools)
+        for name in ("pyre", "fetch", "sight", "lode")
+    )
 
 
 def test_websocket_connect_and_ping() -> None:

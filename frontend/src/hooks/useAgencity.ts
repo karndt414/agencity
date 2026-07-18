@@ -30,6 +30,7 @@ type CityEvent = {
   state?: CreatureState
   creatures?: string[]
   token?: string
+  tool?: string
   error?: string
   alert?: Omit<CreatureAlert, 'id' | 'creature'>
 }
@@ -118,6 +119,12 @@ export function useAgencity() {
           setThoughts((current) => ({
             ...current,
             [event.creature!]: `${current[event.creature!] ?? ''}${event.token}`.slice(-240),
+          }))
+        }
+        if (event.type === 'tool_call' && event.creature) {
+          setThoughts((current) => ({
+            ...current,
+            [event.creature!]: `Using ${event.tool ?? 'a tool'} to research the quest…`,
           }))
         }
         if (event.type === 'alert' && event.creature && event.alert) {
