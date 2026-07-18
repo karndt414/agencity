@@ -323,17 +323,27 @@ async def collaborate_on_quest(
                 "error": str(exc),
             },
         )
+        await _emit(
+            sink,
+            {
+                "type": "collaboration_end",
+                "coordinator": coordinator,
+                "participants": list(reports),
+                "status": "error",
+            },
+        )
         return first_pass
 
+    first_pass[coordinator] = synthesis
     await _emit(
         sink,
         {
             "type": "collaboration_end",
             "coordinator": coordinator,
             "participants": list(reports),
+            "status": "found",
         },
     )
-    first_pass[coordinator] = synthesis
     return first_pass
 
 

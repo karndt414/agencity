@@ -1,8 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export const CORE_CREATURES = ['pyre', 'fetch', 'sight', 'lode'] as const
 
 export type CreatureState = 'idle' | 'hunting' | 'found' | 'error'
+
+export type OfficeActivity = {
+  mode: 'working' | 'talking' | 'celebrating' | 'error'
+  message: string
+  updatedAt: number
+}
+
+export type OfficeCollaboration = {
+  phase: 'gathering' | 'meeting' | 'returning'
+  participants: string[]
+  coordinator?: string
+}
 
 export type ApiUsage = {
   inputTokens: number
@@ -24,12 +36,6 @@ export type CreatureAlert = {
   recommendation: string
   sources: string[]
   phase?: string
-}
-
-export type CollaborationState = {
-  participants: string[]
-  coordinator: string
-  phase: 'meeting' | 'leaving'
 }
 
 type ConnectionState = 'connecting' | 'online' | 'offline'
@@ -88,9 +94,9 @@ export function useAgencity() {
   const [states, setStates] = useState<Record<string, CreatureState>>(initialStates)
   const [alerts, setAlerts] = useState<CreatureAlert[]>([])
   const [thoughts, setThoughts] = useState<Record<string, string>>({})
+  const [activities, setActivities] = useState<Record<string, OfficeActivity>>({})
+  const [collaboration, setCollaboration] = useState<OfficeCollaboration | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [collaboration, setCollaboration] = useState<CollaborationState | null>(null)
-  const collaborationExitTimer = useRef<number | undefined>(undefined)
   const [usage, setUsage] = useState<ApiUsage>({
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -106,7 +112,32 @@ export function useAgencity() {
     const controller = new AbortController()
     let socket: WebSocket | undefined
     let retryTimer: number | undefined
+    let collaborationTimer: number | undefined
+    const activityTimers = new Map<string, number>()
     let active = true
+
+    const showActivity = (
+      creature: string,
+      activity: Omit<OfficeActivity, 'updatedAt'>,
+      duration?: number,
+    ) => {
+      const previousTimer = activityTimers.get(creature)
+      if (previousTimer) window.clearTimeout(previousTimer)
+      setActivities((current) => ({
+        ...current,
+        [creature]: { ...activity, updatedAt: Date.now() },
+      }))
+      if (duration) {
+        activityTimers.set(creature, window.setTimeout(() => {
+          setActivities((current) => {
+            const next = { ...current }
+            delete next[creature]
+            return next
+          })
+          activityTimers.delete(creature)
+        }, duration))
+      }
+    }
 
     const checkHealth = () => {
       fetch('/api/health', { signal: controller.signal })
@@ -157,6 +188,20 @@ export function useAgencity() {
         }
         if (event.type === 'state' && event.creature && event.state) {
           setStates((current) => ({ ...current, [event.creature!]: event.state! }))
+          if (event.state === 'hunting') {
+            showActivity(event.creature, {
+              mode: 'working',
+              message: event.phase === 'synthesis'
+                ? 'Synthesizing the team’s findings…'
+                : 'Investigating the new quest…',
+            })
+          }
+          if (event.state === 'found') {
+            showActivity(event.creature, {
+              mode: 'celebrating',
+              message: event.phase === 'synthesis' ? 'Council synthesis complete!' : 'Found something useful!',
+            }, 6000)
+          }
         }
         if (event.type === 'thought' && event.creature && event.token) {
           setThoughts((current) => ({
@@ -165,36 +210,61 @@ export function useAgencity() {
           }))
         }
         if (event.type === 'tool_call' && event.creature) {
+          const toolMessage = `Using ${event.tool ?? 'a tool'} to research the quest…`
           setThoughts((current) => ({
             ...current,
-            [event.creature!]: `Using ${event.tool ?? 'a tool'} to research the quest…`,
+            [event.creature!]: toolMessage,
           }))
+          showActivity(event.creature, { mode: 'working', message: toolMessage })
         }
         if (event.type === 'collaboration' && event.to) {
+          const sharedMessage = `${event.from ?? 'A teammate'} shared: ${event.headline ?? 'new findings'}`
           setThoughts((current) => ({
             ...current,
-            [event.to!]: `${event.from ?? 'A teammate'} shared: ${event.headline ?? 'new findings'}`,
+            [event.to!]: sharedMessage,
           }))
+          showActivity(event.to, { mode: 'talking', message: 'Connecting the team’s findings…' })
+          if (event.from) {
+            showActivity(event.from, {
+              mode: 'talking',
+              message: `Shared: ${event.headline ?? 'new findings'}`,
+            })
+          }
         }
-        if (event.type === 'collaboration_start' && event.coordinator) {
-          if (collaborationExitTimer.current) window.clearTimeout(collaborationExitTimer.current)
+        if (event.type === 'collaboration_start' && event.participants) {
+          if (collaborationTimer) window.clearTimeout(collaborationTimer)
           setCollaboration({
+            phase: 'gathering',
+            participants: event.participants,
             coordinator: event.coordinator,
-            participants: event.participants ?? [],
-            phase: 'meeting',
           })
-          setThoughts((current) => ({
-            ...current,
-            [event.coordinator!]: 'Reviewing the party’s specialist reports…',
+          event.participants.forEach((creature) => showActivity(creature, {
+            mode: 'talking',
+            message: 'Heading to the Collaboration Hub…',
           }))
+          if (event.coordinator) {
+            setThoughts((current) => ({
+              ...current,
+              [event.coordinator!]: 'Reviewing the party’s specialist reports…',
+            }))
+          }
+          collaborationTimer = window.setTimeout(() => {
+            setCollaboration((current) => current ? { ...current, phase: 'meeting' } : null)
+          }, 1450)
         }
         if (event.type === 'collaboration_end' || event.type === 'collaboration_error') {
-          setCollaboration((current) => current ? { ...current, phase: 'leaving' } : null)
-          if (collaborationExitTimer.current) window.clearTimeout(collaborationExitTimer.current)
-          collaborationExitTimer.current = window.setTimeout(() => {
-            setCollaboration(null)
-            collaborationExitTimer.current = undefined
-          }, 900)
+          if (collaborationTimer) window.clearTimeout(collaborationTimer)
+          setCollaboration((current) => current ? { ...current, phase: 'returning' } : null)
+          const participants = event.participants ?? []
+          participants.forEach((creature) => showActivity(creature, {
+            mode: 'celebrating',
+            message: 'Council wrapped — back to my room!',
+          }, 4200))
+          collaborationTimer = window.setTimeout(() => setCollaboration(null), 1450)
+        }
+        if (event.type === 'handoff' && event.from && event.to) {
+          showActivity(event.from, { mode: 'talking', message: `Looping in ${event.to}…` }, 5000)
+          showActivity(event.to, { mode: 'talking', message: `${event.from} sent me context.` }, 5000)
         }
         if (event.type === 'usage') {
           setUsage((current) => ({
@@ -224,6 +294,7 @@ export function useAgencity() {
         if (event.type === 'error') {
           if (event.creature) {
             setStates((current) => ({ ...current, [event.creature!]: 'error' }))
+            showActivity(event.creature, { mode: 'error', message: 'I hit a snag — check the alert.' }, 7000)
           }
           setError(event.error ?? 'The backend reported an error')
         }
@@ -232,10 +303,7 @@ export function useAgencity() {
         if (!active) return
         setConnection('offline')
         setCollaboration(null)
-        if (collaborationExitTimer.current) {
-          window.clearTimeout(collaborationExitTimer.current)
-          collaborationExitTimer.current = undefined
-        }
+        if (collaborationTimer) window.clearTimeout(collaborationTimer)
         retryTimer = window.setTimeout(connect, 1500)
       })
       socket.addEventListener('error', () => socket?.close())
@@ -246,7 +314,8 @@ export function useAgencity() {
       active = false
       controller.abort()
       if (retryTimer) window.clearTimeout(retryTimer)
-      if (collaborationExitTimer.current) window.clearTimeout(collaborationExitTimer.current)
+      if (collaborationTimer) window.clearTimeout(collaborationTimer)
+      activityTimers.forEach((timer) => window.clearTimeout(timer))
       socket?.close()
     }
   }, [])
@@ -371,6 +440,7 @@ export function useAgencity() {
   }, [])
 
   return {
+    activities,
     alerts,
     apiKeyConfigured,
     connection,

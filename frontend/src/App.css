@@ -721,6 +721,132 @@ button {
 
 .room-workstation.is-supporting .desk-screen b:nth-child(2) { animation-delay: -0.25s; }
 .room-workstation.is-supporting .desk-screen b:nth-child(3) { animation-delay: -0.5s; }
+.room-workstation.runtime-hunting .desk-screen {
+  background: #e8bd59;
+  box-shadow: inset 0 0 0 3px #ffe9a5, 0 0 9px #e9a844;
+}
+
+.office-actors {
+  position: absolute;
+  z-index: 12;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.office-actor {
+  position: absolute;
+  width: 76px;
+  height: 90px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(3px 5px 0 rgba(58, 40, 33, 0.24));
+  transition:
+    left 1.4s steps(14, jump-none),
+    top 1.4s steps(14, jump-none);
+  will-change: left, top;
+}
+
+.office-actor.is-subagent { transform: translate(-50%, -50%) scale(0.88); }
+.office-actor.actor-walking { z-index: 15; }
+.office-actor.actor-working { filter: drop-shadow(0 0 7px rgba(246, 184, 70, 0.9)); }
+.office-actor.actor-error { filter: drop-shadow(0 0 7px rgba(183, 79, 69, 0.85)); }
+
+.pet-sprite {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background-image: var(--sprite-image);
+  background-position: 0 var(--sprite-row);
+  background-repeat: no-repeat;
+  background-size: 800% calc(var(--sprite-rows) * 100%);
+  image-rendering: pixelated;
+  animation: atlas-frames-6 0.9s steps(5) infinite;
+  animation-delay: var(--actor-delay);
+}
+
+.office-actor.frames-8 .pet-sprite { animation-name: atlas-frames-8; animation-timing-function: steps(7); }
+.office-actor.frames-5 .pet-sprite { animation-name: atlas-frames-5; animation-timing-function: steps(4); }
+.office-actor.frames-4 .pet-sprite { animation-name: atlas-frames-4; animation-timing-function: steps(3); }
+.office-actor.actor-walking .pet-sprite { animation-duration: 0.64s; }
+.office-actor.actor-working .pet-sprite { animation-duration: 0.7s; }
+
+.actor-name,
+.actor-runtime {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  transform: translateX(-50%);
+  border: 2px solid #543a31;
+  box-shadow: 2px 2px 0 rgba(67, 43, 34, 0.25);
+  white-space: nowrap;
+}
+
+.actor-name {
+  top: 67px;
+  gap: 3px;
+  padding: 3px 4px;
+  background: #f5e3ba;
+  color: #4e382f;
+  font-size: 0.34rem;
+  font-weight: 950;
+}
+
+.actor-name b {
+  padding: 1px 2px;
+  background: var(--room-color, #806b9b);
+  color: #fff3d2;
+  font-size: 0.25rem;
+}
+
+.actor-runtime {
+  top: 83px;
+  gap: 3px;
+  padding: 2px 4px;
+  background: #ead2a3;
+  color: #654a3e;
+  font-size: 0.25rem;
+  font-weight: 950;
+}
+
+.actor-runtime i { width: 4px; height: 4px; background: #8b7566; }
+.actor-runtime.is-live i { background: #579362; }
+.actor-runtime.is-supporting { background: #f4cf75; color: #714421; }
+.actor-runtime.is-supporting i { background: #cc6f3d; animation: hunting-blink 0.55s steps(2) infinite; }
+
+.agent-bubble {
+  position: absolute;
+  z-index: 8;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  width: max-content;
+  max-width: 158px;
+  padding: 7px 8px;
+  transform: translateX(-50%);
+  border: 3px solid #513a31;
+  background: #fff4cf;
+  box-shadow: 3px 3px 0 rgba(72, 48, 38, 0.32), inset 0 -3px #efd59d;
+  color: #4d372f;
+  font-size: 0.4rem;
+  font-weight: 900;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.agent-bubble::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -3px) rotate(45deg);
+  border-right: 3px solid #513a31;
+  border-bottom: 3px solid #513a31;
+  background: #efd59d;
+  content: '';
+}
 
 .room-workstation.is-at-council .pixel-character {
   opacity: 0;
@@ -2286,6 +2412,26 @@ p { margin: 0; }
   69%, 100% { opacity: 0.38; }
 }
 
+@keyframes atlas-frames-8 {
+  from { background-position-x: 0; }
+  to { background-position-x: 100%; }
+}
+
+@keyframes atlas-frames-6 {
+  from { background-position-x: 0; }
+  to { background-position-x: 71.4286%; }
+}
+
+@keyframes atlas-frames-5 {
+  from { background-position-x: 0; }
+  to { background-position-x: 57.1429%; }
+}
+
+@keyframes atlas-frames-4 {
+  from { background-position-x: 0; }
+  to { background-position-x: 42.8571%; }
+}
+
 @media (max-width: 1080px) {
   .office-viewport { inset: 0; }
   .agent-hud { width: 168px; }
@@ -2359,6 +2505,8 @@ p { margin: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .office-actor,
+  .pet-sprite,
   .pixel-character,
   .pixel-room,
   .agent-online,

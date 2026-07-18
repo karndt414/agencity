@@ -91,6 +91,7 @@ function isLongAlert(alert: {
 
 function App() {
   const {
+    activities,
     alerts,
     apiKeyConfigured,
     connection,
@@ -475,6 +476,8 @@ function App() {
           rooms={rooms}
           selectedRoomId={selectedRoomId}
           agentStates={states}
+          activities={activities}
+          collaboration={collaboration}
           onSelectRoom={(room) => {
             if (!suppressRoomClickRef.current) handleFocusRoom(room)
           }}
@@ -482,7 +485,6 @@ function App() {
           availableCreatures={creatures}
           camera={camera}
           isPanning={isPanning}
-          collaboration={collaboration}
         />
       </div>
 
